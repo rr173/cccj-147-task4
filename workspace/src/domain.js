@@ -32,9 +32,18 @@ const CONFLICT_CODES = new Set([
   'ALREADY_PLEDGED',
   'ALREADY_REGISTERED',
   'STALE_RECEIPT_VERSION',
+  'STALE_PLEDGE_VERSION',
   'PLEDGE_CLOSED',
   'NOT_CANCELLABLE',
   'PLEDGE_NOT_ACTIVE',
+  'PLEDGE_NOT_REGISTERED',
+  'PLEDGE_SETTLED',
+  'RELEASE_EXISTS',
+  'TRANSFER_ALREADY_PENDING',
+  'TRANSFER_WITHDRAWN',
+  'TRANSFER_REJECTED',
+  'TRANSFER_EFFECTIVE',
+  'ALREADY_CONFIRMED',
   'IDEMPOTENT_REPLAY'
 ]);
 const ACTION_LABELS = {
@@ -43,15 +52,32 @@ const ACTION_LABELS = {
   cancel: '撤回锁定',
   supplement: '补充担保',
   repay: '还款',
-  release: '质权人放行'
+  release: '质权人放行',
+  transferApply: '质权转让申请',
+  transferConfirm: '质权转让确认',
+  transferWithdraw: '撤回质权转让'
 };
 const outcomeOfCode = (code) => (CONFLICT_CODES.has(code) ? OUTCOME_CONFLICT : OUTCOME_REJECTED);
 /** 幂等键的构造必须与各业务函数保持一致 */
 const IDEMPOTENCY_KEY_OF = {
   lock: (b) => (b.reqId ? 'pledge-lock:' + b.reqId : null),
   register: (b) => (b.registrationNo ? 'register:' + b.registrationNo : null),
-  release: (b) => (b.reqId ? 'release:' + b.reqId : null)
+  release: (b) => (b.reqId ? 'release:' + b.reqId : null),
+  transferApply: (b) => (b.reqId ? 'transfer-apply:' + b.reqId : null),
+  transferConfirm: (b) => (b.reqId ? 'transfer-confirm:' + b.reqId : null),
+  transferWithdraw: (b) => (b.reqId ? 'transfer-withdraw:' + b.reqId : null)
 };
+
+/* ---------------- 质权转让状态 ----------------
+ * PENDING   双方待确认(原质权人/受让机构各确认一次,顺序不限)
+ * WITHDRAWN 任一方撤回,申请终结,可重新发起
+ * EFFECTIVE 双方确认且通过生效闸口(质押仍存续、未清偿、无生效放行单),权利人已切换
+ * REJECTED  第二方确认触发的生效闸口未通过(已清偿/已存在生效放行单/质押不再存续)
+ */
+const TRANSFER_PENDING = 'PENDING';
+const TRANSFER_WITHDRAWN = 'WITHDRAWN';
+const TRANSFER_EFFECTIVE = 'EFFECTIVE';
+const TRANSFER_REJECTED = 'REJECTED';
 
 /* ----------------------------- 查询辅助 ----------------------------- */
 const must = (arr, pred, code, msg) => {
@@ -73,6 +99,21 @@ function pledgeOf(s, pledgeId) {
 }
 function activePledgeOf(s, receiptId) {
   return s.pledges.find((p) => p.receiptId === receiptId && ACTIVE_PLEDGE_STATUS.includes(p.status));
+}
+function transferOf(s, transferId) {
+  return must(s.transfers, (t) => t.id === transferId, 'TRANSFER_NOT_FOUND', `质权转让申请 ${transferId} 不存在`);
+}
+function pendingTransferOf(s, pledgeId) {
+  return s.transfers.find((t) => t.pledgeId === pledgeId && t.status === TRANSFER_PENDING);
+}
+/**
+ * 「生效放行单」:质权人签发、尚未用罄的放行单(未核销或仍有剩余数量)。
+ * 一旦存在,说明货物已具备放行/出库条件,此时不得再做质权切换。
+ */
+function findEffectiveRelease(s, pledgeId) {
+  return s.releases.find(
+    (x) => x.pledgeId === pledgeId && (!x.consumed || round3(x.qty - (x.usedQty || 0)) > 1e-6)
+  );
 }
 
 /** I1:校验同库位有效仓单区间互不相交(ignoreId 用于拆分/复检时排除自身) */
@@ -625,6 +666,8 @@ function lockPledge(input) {
       status: 'LOCKED', // 登记前仅内部锁定(I4)
       publicClaimAllowed: false,
       registration: null,
+      rightsVersion: 1, // 权利人权属版本:每次质权转让生效 +1,旧版本申请晚到拒绝
+      currentTransferId: null, // 当前待确认转让申请(无则 null)
       createdAt: Date.now(),
       revaluationCount: 0
     };
@@ -709,11 +752,12 @@ function registerPledge(input) {
 
     if (p.status === 'CANCELLED' || p.status === 'RELEASED' || p.status === 'DELIVERED')
       throw new DomainError('PLEDGE_CLOSED', `质押已终结(${p.status}),不能登记`);
-    if (p.status === 'REGISTERED' || p.status === 'SUPPLEMENTING')
-      throw new DomainError('ALREADY_REGISTERED', `质押 ${p.id} 已登记,回执 ${p.registration.registrationNo}`);
-    // 登记是对担保权的处分,仅当前质权人本人可提交
+    // 登记是对担保权的处分,仅当前质权人本人可提交;
+    // 质权转让后旧质权人持任何回执号都先在此被拒(不会落到 ALREADY_REGISTERED 而掩盖越权)
     if (input.actorId && input.actorId !== p.financerId)
       throw new DomainError('FORBIDDEN', `仅当前质权人 ${p.financerId} 可登记,${input.actorId} 的请求拒绝`);
+    if (p.status === 'REGISTERED' || p.status === 'SUPPLEMENTING')
+      throw new DomainError('ALREADY_REGISTERED', `质押 ${p.id} 已登记,回执 ${p.registration.registrationNo}`);
 
     const r = receiptOf(s, p.receiptId);
     const expectedVersion = Number(input.expectedVersion != null ? input.expectedVersion : p.receiptVersion);
@@ -767,6 +811,9 @@ function supplementCollateral(input) {
     if (!(amount > 0)) throw new DomainError('BAD_AMOUNT', '补充金额必须为正');
     if (!ACTIVE_PLEDGE_STATUS.includes(p.status))
       throw new DomainError('PLEDGE_CLOSED', '质押已终结,不能补充担保');
+    // 补充担保改变质押覆盖金额:仅出质人或当前质权人可办,已交接质权的旧质权人不可办
+    if (input.actorId && input.actorId !== p.financerId && input.actorId !== p.pledgorId)
+      throw new DomainError('FORBIDDEN', `仅当前质权人 ${p.financerId} 或出质人可补充担保,${input.actorId} 已不是该质押的权利人`);
     p.coveredAmount = round3((p.coveredAmount || 0) + amount);
 
     const open = s.supplements.find((x) => x.pledgeId === p.id && x.status === 'OPEN');
@@ -792,12 +839,15 @@ function supplementCollateral(input) {
   });
 }
 
-/** 还款:敞口归零,自动具备解除条件 */
+/* ===================== 还款(弥覆盖缺口/清偿) ===================== */
 function repayPledge(input) {
   return transact((s, tx) => {
     const p = pledgeOf(s, input.pledgeId);
     const amount = round3(Number(input.amount));
     if (!(amount > 0)) throw new DomainError('BAD_AMOUNT', '还款金额必须为正');
+    // 还款/清偿是对当前质权人的处分:出质人或当前质权人可办,已交出质权的旧质权人不可办
+    if (input.actorId && input.actorId !== p.financerId && input.actorId !== p.pledgorId)
+      throw new DomainError('FORBIDDEN', `仅当前质权人 ${p.financerId} 或出质人可还款,${input.actorId} 已不是该质押的权利人`);
     p.coveredAmount = round3(Math.min(p.loanAmount, (p.coveredAmount || 0) + amount));
     if (exposureOf(p) <= 0) {
       const open = s.supplements.find((x) => x.pledgeId === p.id && x.status === 'OPEN');
@@ -889,6 +939,337 @@ function releasePledge(input) {
   });
 }
 
+/* ===================== 质权转让与交接(双方确认后切换权利人) =====================
+ * 不变量:
+ *  I8-1 仅已登记(REGISTERED/SUPPLEMENTING)存续质押可发起转让,且同一质押同时只允许
+ *       一笔 PENDING 转让;并发的第二笔得到 TRANSFER_ALREADY_PENDING。
+ *  I8-2 申请须锁定当时质权与质押权利版本(rightsVersion);基于旧版本的申请/确认晚到
+ *       一律 STALE_PLEDGE_VERSION 拒绝,当前权利人不变。
+ *  I8-3 原质权人与受让机构必须分别确认同一申请;非参与方确认 FORBIDDEN;同一方重复
+ *       确认 ALREADY_CONFIRMED,均不改变状态。
+ *  I8-4 仅当双方确认 + 质押仍存续 + 敞口未清偿 + 不存在生效放行单时,才在同一事务内
+ *       切换 financerId(原登记凭证保持不动,权利版本 +1);否则申请记 REJECTED 并
+ *       返回明确原因(PLEDGE_CLOSED/PLEDGE_SETTLED/RELEASE_EXISTS),不切换。
+ *  I8-5 切换后旧质权人的登记/还款/放行请求一律 FORBIDDEN;新质权人沿用原质押继续处理。
+ *  I8-6 任一方撤回,申请转 WITHDRAWN,当前权利人不变;可重新发起新转让。
+ */
+function transferReqView(input) {
+  return reqView(input, ['reqId', 'pledgeId', 'transferId', 'actorId', 'toFinancerId', 'expectedRightsVersion', 'side', 'note']);
+}
+
+function transferRef(t) {
+  return {
+    transferId: t.id,
+    pledgeId: t.pledgeId,
+    status: t.status,
+    fromFinancerId: t.fromFinancerId,
+    toFinancerId: t.toFinancerId,
+    expectedRightsVersion: t.expectedRightsVersion,
+    confirmedFrom: !!t.confirmedFrom,
+    confirmedTo: !!t.confirmedTo,
+    effectiveAt: t.effectiveAt || null,
+    rejectCode: t.rejectCode || null
+  };
+}
+
+/** 发起质权转让申请(仅当前质权人对已登记存续质押发起;幂等) */
+function applyTransfer(input) {
+  return transact((s, tx) => {
+    const key = input.reqId ? 'transfer-apply:' + input.reqId : null;
+    if (key && s.idempotency[key]) {
+      const first = s.transfers.find((t) => t.id === s.idempotency[key].transferId);
+      if (input.actorId && first && input.actorId !== first.fromFinancerId)
+        throw new DomainError('FORBIDDEN', `仅原申请人 ${first.fromFinancerId} 可重放该转让申请`);
+      const result = { replayed: true, transfer: transferRef(first) };
+      logAttempt(tx, s, {
+        action: 'transferApply', actorId: input.actorId, sessionId: input.sessionId,
+        receiptId: first ? first.receiptId : null, pledgeId: first ? first.pledgeId : input.pledgeId,
+        idempotencyKey: key, outcome: OUTCOME_CONFLICT, reasonCode: 'IDEMPOTENT_REPLAY',
+        reason: `相同转让申请重放:返回既有申请 ${first ? first.id : ''},不产生第二笔转让`,
+        request: transferReqView(input), ref: first ? transferRef(first) : null
+      });
+      return result;
+    }
+
+    const p = pledgeOf(s, input.pledgeId);
+    if (input.actorId && input.actorId !== p.financerId)
+      throw new DomainError('FORBIDDEN', `仅当前质权人 ${p.financerId} 可发起质权转让,${input.actorId} 的请求拒绝`);
+    if (!ACTIVE_PLEDGE_STATUS.includes(p.status))
+      throw new DomainError('PLEDGE_CLOSED', `质押处于 ${p.status},已非存续状态,不能发起质权转让`);
+    if (p.status === 'LOCKED')
+      throw new DomainError('PLEDGE_NOT_REGISTERED', `质押 ${p.id} 尚未登记,登记生效后方可办理质权转让`);
+
+    const toId = mustHave(input.toFinancerId, 'TO_FINANCER_REQUIRED', '受让机构必填');
+    const to = s.parties.find((x) => x.id === toId);
+    if (!to || to.type !== 'financer')
+      throw new DomainError('BAD_TRANSFEREE', `受让机构 ${toId} 不存在或不是金融机构`);
+    if (toId === p.financerId)
+      throw new DomainError('BAD_TRANSFEREE', '受让机构不能是当前质权人本人');
+
+    const pending = pendingTransferOf(s, p.id);
+    if (pending)
+      throw new DomainError(
+        'TRANSFER_ALREADY_PENDING',
+        `质押 ${p.id} 已有待确认转让 ${pending.id}(${pending.fromFinancerId} → ${pending.toFinancerId}),任一方撤回后方可重新发起`,
+        { existingTransferId: pending.id }
+      );
+
+    // I8-2:锁定质权版本,旧版本晚到的申请拒绝
+    const expectedRightsVersion = Number(
+      input.expectedRightsVersion != null ? input.expectedRightsVersion : p.rightsVersion || 1
+    );
+    if (expectedRightsVersion !== (p.rightsVersion || 1))
+      throw new DomainError(
+        'STALE_PLEDGE_VERSION',
+        `转让申请基于质权版本 r${expectedRightsVersion},当前已为 r${p.rightsVersion}(质权已发生过转让交接),旧版申请拒绝`,
+        { expectedRightsVersion, currentRightsVersion: p.rightsVersion }
+      );
+
+    const id = tx.nextId('transfer', 'TR');
+    const t = {
+      id,
+      pledgeId: p.id,
+      receiptId: p.receiptId,
+      fromFinancerId: p.financerId,
+      toFinancerId: toId,
+      status: TRANSFER_PENDING,
+      expectedRightsVersion,
+      rightsVersionAfter: null, // 生效时记录交接后的权利版本,用于审计按时点核对权利人链
+      confirmedFrom: false,
+      confirmedTo: false,
+      confirmations: [],
+      createdAt: Date.now(),
+      createdBy: input.actorId || p.financerId,
+      effectiveAt: null,
+      withdrawnBy: null,
+      withdrawnAt: null,
+      rejectCode: null,
+      rejectReason: null
+    };
+    s.transfers.push(t);
+    p.currentTransferId = id;
+    if (key) s.idempotency[key] = { transferId: id, at: t.createdAt };
+
+    tx.appendEvent('PLEDGE_TRANSFER_APPLIED', {
+      receiptId: p.receiptId, pledgeId: p.id, actorId: input.actorId || p.financerId,
+      payload: {
+        transferId: id, fromFinancerId: t.fromFinancerId, toFinancerId: t.toFinancerId,
+        expectedRightsVersion, registrationNo: p.registration ? p.registration.registrationNo : null
+      }
+    });
+    const result = { replayed: false, transfer: transferRef(t) };
+    logAttempt(tx, s, {
+      action: 'transferApply', actorId: input.actorId || p.financerId, sessionId: input.sessionId,
+      receiptId: p.receiptId, pledgeId: p.id, idempotencyKey: key, outcome: OUTCOME_SUCCESS,
+      request: transferReqView(input), ref: transferRef(t)
+    });
+    return result;
+  });
+}
+
+/**
+ * 一方确认转让(原质权人 side=from / 受让机构 side=to,也可按 actorId 自动判定)。
+ * 第二方确认时在同一事务执行生效闸口;闸口失败则把申请置 REJECTED 并返回明确结果。
+ */
+function confirmTransfer(input) {
+  return transact((s, tx) => {
+    const key = input.reqId ? 'transfer-confirm:' + input.reqId : null;
+    if (key && s.idempotency[key]) {
+      const first = s.transfers.find((t) => t.id === s.idempotency[key].transferId);
+      const conf = first ? first.confirmations.find((c) => c.idempotencyKey === key) : null;
+      if (input.actorId && first && ![first.fromFinancerId, first.toFinancerId].includes(input.actorId))
+        throw new DomainError('FORBIDDEN', '仅转让双方可重放该确认请求');
+      const result = { replayed: true, transfer: first ? transferRef(first) : null, confirmation: conf || null };
+      logAttempt(tx, s, {
+        action: 'transferConfirm', actorId: input.actorId, sessionId: input.sessionId,
+        receiptId: first ? first.receiptId : null, pledgeId: first ? first.pledgeId : input.pledgeId,
+        idempotencyKey: key, outcome: OUTCOME_CONFLICT, reasonCode: 'IDEMPOTENT_REPLAY',
+        reason: `相同转让确认重放:返回申请 ${first ? first.id : ''} 的既有状态,不重复确认`,
+        request: transferReqView(input), ref: first ? transferRef(first) : null
+      });
+      return result;
+    }
+
+    const t = transferOf(s, input.transferId);
+    const p = pledgeOf(s, t.pledgeId);
+    const actorId = mustHave(input.actorId, 'ACTOR_REQUIRED', '确认主体必填');
+    let side = input.side;
+    if (!side) side = actorId === t.fromFinancerId ? 'from' : actorId === t.toFinancerId ? 'to' : null;
+    if (actorId !== t.fromFinancerId && actorId !== t.toFinancerId)
+      throw new DomainError('FORBIDDEN', `${actorId} 不是转让 ${t.id} 的参与方,仅 ${t.fromFinancerId}(原质权人)与 ${t.toFinancerId}(受让机构)可确认`);
+    if (side === 'from' && actorId !== t.fromFinancerId)
+      throw new DomainError('FORBIDDEN', `原质权人一方仅可由 ${t.fromFinancerId} 确认`);
+    if (side === 'to' && actorId !== t.toFinancerId)
+      throw new DomainError('FORBIDDEN', `受让机构一方仅可由 ${t.toFinancerId} 确认`);
+
+    // 终结态优先:无论是否携带旧版本号,重复确认都明确返回该申请当前的终态
+    if (t.status === TRANSFER_EFFECTIVE)
+      throw new DomainError('TRANSFER_EFFECTIVE', `转让 ${t.id} 已生效,权利人已切换为 ${t.toFinancerId},重复确认不改变状态`);
+    if (t.status === TRANSFER_WITHDRAWN)
+      throw new DomainError('TRANSFER_WITHDRAWN', `转让 ${t.id} 已被 ${t.withdrawnBy} 撤回,确认无效,当前权利人不变`);
+    if (t.status === TRANSFER_REJECTED)
+      throw new DomainError('TRANSFER_REJECTED', `转让 ${t.id} 已被拒绝(${t.rejectCode}),确认无效,当前权利人不变`, { rejectCode: t.rejectCode });
+
+    // I8-2:基于旧质权版本的确认晚到,拒绝且不切换
+    const expectedRightsVersion = Number(
+      input.expectedRightsVersion != null ? input.expectedRightsVersion : t.expectedRightsVersion
+    );
+    if (expectedRightsVersion !== (p.rightsVersion || 1))
+      throw new DomainError(
+        'STALE_PLEDGE_VERSION',
+        `确认基于质权版本 r${expectedRightsVersion},当前已为 r${p.rightsVersion}(质权已交接),旧版确认拒绝`,
+        { expectedRightsVersion, currentRightsVersion: p.rightsVersion }
+      );
+
+    const already = side === 'from' ? t.confirmedFrom : t.confirmedTo;
+    if (already) {
+      const otherSide = side === 'from' ? t.confirmedTo : t.confirmedFrom;
+      throw new DomainError(
+        'ALREADY_CONFIRMED',
+        `${actorId} 已确认过转让 ${t.id};重复确认不改变状态` + (otherSide ? '(双方均已确认,以生效闸口结论为准)' : '(等待另一方确认)')
+      );
+    }
+
+    t.confirmedFrom = side === 'from' ? true : t.confirmedFrom;
+    t.confirmedTo = side === 'to' ? true : t.confirmedTo;
+    const conf = { side, actorId, at: Date.now(), idempotencyKey: key };
+    t.confirmations.push(conf);
+    if (key) s.idempotency[key] = { transferId: t.id, at: conf.at };
+
+    tx.appendEvent('PLEDGE_TRANSFER_CONFIRMED', {
+      receiptId: t.receiptId, pledgeId: t.pledgeId, actorId,
+      payload: { transferId: t.id, side, confirmedFrom: t.confirmedFrom, confirmedTo: t.confirmedTo }
+    });
+
+    // 第二方确认 → 生效闸口(同一事务):双方确认 + 仍存续 + 未清偿 + 无生效放行单
+    if (t.confirmedFrom && t.confirmedTo) {
+      const gate = evaluateTransferGate(s, t, p);
+      if (gate.ok) {
+        const oldFinancer = p.financerId;
+        p.financerId = t.toFinancerId;
+        p.rightsVersion = (p.rightsVersion || 1) + 1;
+        p.currentTransferId = null;
+        t.status = TRANSFER_EFFECTIVE;
+        t.effectiveAt = Date.now();
+        t.rightsVersionAfter = p.rightsVersion;
+        // I8-5:旧放行单是旧质权人签发的,交接后不得再被新质权人/仓库用于出库
+        s.releases
+          .filter((x) => x.pledgeId === p.id && !x.consumed)
+          .forEach((x) => { x.voidedAt = Date.now(); x.voidReason = 'PLEDGE_TRANSFERRED'; x.consumed = true; });
+        tx.appendEvent('PLEDGE_TRANSFER_EFFECTIVE', {
+          receiptId: t.receiptId, pledgeId: t.pledgeId, actorId,
+          payload: {
+            transferId: t.id, oldFinancerId: oldFinancer, newFinancerId: t.toFinancerId,
+            rightsVersionAfter: p.rightsVersion,
+            registrationNo: p.registration ? p.registration.registrationNo : null,
+            voidedReleases: s.releases.filter((x) => x.pledgeId === p.id && x.voidReason === 'PLEDGE_TRANSFERRED').map((x) => x.id)
+          }
+        });
+        const result = { replayed: false, transfer: transferRef(t), effective: true, pledgeId: p.id, financerId: p.financerId };
+        logAttempt(tx, s, {
+          action: 'transferConfirm', actorId, sessionId: input.sessionId,
+          receiptId: t.receiptId, pledgeId: t.pledgeId, idempotencyKey: key, outcome: OUTCOME_SUCCESS,
+          reason: '双方确认且通过生效闸口,质权人已切换', request: transferReqView(input), ref: transferRef(t)
+        });
+        return result;
+      }
+
+      // 闸口未过:申请记 REJECTED(与确认留痕同一事务原子提交),权利人不变
+      t.status = TRANSFER_REJECTED;
+      t.rejectCode = gate.code;
+      t.rejectReason = gate.message;
+      p.currentTransferId = null;
+      tx.appendEvent('PLEDGE_TRANSFER_REJECTED', {
+        receiptId: t.receiptId, pledgeId: t.pledgeId, actorId: 'SYSTEM',
+        payload: { transferId: t.id, reasonCode: gate.code, reason: gate.message }
+      });
+      logAttempt(tx, s, {
+        action: 'transferConfirm', actorId, sessionId: input.sessionId,
+        receiptId: t.receiptId, pledgeId: t.pledgeId, idempotencyKey: key, outcome: outcomeOfCode(gate.code),
+        reasonCode: gate.code, reason: gate.message, request: transferReqView(input), ref: transferRef(t)
+      });
+      // HTTP 层返回 200 + 明确结论(非异常):申请已落为 REJECTED,监管可按「拒绝」回放
+      return { replayed: false, transfer: transferRef(t), effective: false, rejectCode: gate.code, rejectReason: gate.message };
+    }
+
+    // 仅单方确认,等待另一方
+    const result = { replayed: false, transfer: transferRef(t), effective: false, waitingFor: side === 'from' ? 'to' : 'from' };
+    logAttempt(tx, s, {
+      action: 'transferConfirm', actorId, sessionId: input.sessionId,
+      receiptId: t.receiptId, pledgeId: t.pledgeId, idempotencyKey: key, outcome: OUTCOME_SUCCESS,
+      reason: side === 'from' ? '原质权人已确认,等待受让机构确认' : '受让机构已确认,等待原质权人确认',
+      request: transferReqView(input), ref: transferRef(t)
+    });
+    return result;
+  });
+}
+
+/** 生效闸口:返回 {ok:true} 或 {code,message}(不抛错,由调用方决定落 REJECTED) */
+function evaluateTransferGate(s, t, p) {
+  if (!ACTIVE_PLEDGE_STATUS.includes(p.status))
+    return { ok: false, code: 'PLEDGE_CLOSED', message: `质押 ${p.id} 已非存续状态(${p.status}),质权转让不生效` };
+  if (p.financerId !== t.fromFinancerId)
+    return { ok: false, code: 'TRANSFER_EFFECTIVE', message: `当前质权人已是 ${p.financerId},与转让申请的原质权人不一致` };
+  if (exposureOf(p) <= 1e-6)
+    return { ok: false, code: 'PLEDGE_SETTLED', message: `质押 ${p.id} 已全额清偿(敞口为 0),质权已无担保利益,转让不生效` };
+  const rel = findEffectiveRelease(s, p.id);
+  if (rel)
+    return {
+      ok: false,
+      code: 'RELEASE_EXISTS',
+      message: `质押 ${p.id} 已存在生效放行单 ${rel.id}(令牌 ${rel.token},剩余 ${round3(rel.qty - (rel.usedQty || 0))} 吨),须先核销/用罄后方可交接质权`
+    };
+  return { ok: true };
+}
+
+/** 任一方撤回转让(幂等);撤回后当前权利人不变 */
+function withdrawTransfer(input) {
+  return transact((s, tx) => {
+    const key = input.reqId ? 'transfer-withdraw:' + input.reqId : null;
+    if (key && s.idempotency[key]) {
+      const first = s.transfers.find((t) => t.id === s.idempotency[key].transferId);
+      const result = { replayed: true, transfer: first ? transferRef(first) : null };
+      logAttempt(tx, s, {
+        action: 'transferWithdraw', actorId: input.actorId, sessionId: input.sessionId,
+        receiptId: first ? first.receiptId : null, pledgeId: first ? first.pledgeId : input.pledgeId,
+        idempotencyKey: key, outcome: OUTCOME_CONFLICT, reasonCode: 'IDEMPOTENT_REPLAY',
+        reason: `相同撤回请求重放:申请 ${first ? first.id : ''} 保持 ${first ? first.status : ''},不重复处理`,
+        request: transferReqView(input), ref: first ? transferRef(first) : null
+      });
+      return result;
+    }
+
+    const t = transferOf(s, input.transferId);
+    const actorId = mustHave(input.actorId, 'ACTOR_REQUIRED', '撤回主体必填');
+    if (actorId !== t.fromFinancerId && actorId !== t.toFinancerId)
+      throw new DomainError('FORBIDDEN', `${actorId} 不是转让 ${t.id} 的参与方,无权撤回`);
+    if (t.status === TRANSFER_EFFECTIVE)
+      throw new DomainError('TRANSFER_EFFECTIVE', `转让 ${t.id} 已生效,质权已交接,不能撤回`);
+    if (t.status === TRANSFER_REJECTED)
+      throw new DomainError('TRANSFER_REJECTED', `转让 ${t.id} 已被拒绝(${t.rejectCode}),无需撤回`);
+    if (t.status === TRANSFER_WITHDRAWN)
+      throw new DomainError('TRANSFER_WITHDRAWN', `转让 ${t.id} 已被 ${t.withdrawnBy} 撤回,重复撤回不改变状态`);
+
+    t.status = TRANSFER_WITHDRAWN;
+    t.withdrawnBy = actorId;
+    t.withdrawnAt = Date.now();
+    const p = pledgeOf(s, t.pledgeId);
+    p.currentTransferId = null;
+    if (key) s.idempotency[key] = { transferId: t.id, at: t.withdrawnAt };
+
+    tx.appendEvent('PLEDGE_TRANSFER_WITHDRAWN', {
+      receiptId: t.receiptId, pledgeId: t.pledgeId, actorId,
+      payload: { transferId: t.id, confirmedFrom: t.confirmedFrom, confirmedTo: t.confirmedTo }
+    });
+    logAttempt(tx, s, {
+      action: 'transferWithdraw', actorId, sessionId: input.sessionId,
+      receiptId: t.receiptId, pledgeId: t.pledgeId, idempotencyKey: key, outcome: OUTCOME_SUCCESS,
+      reason: '转让申请已撤回,当前质权人不变,可重新发起', request: transferReqView(input), ref: transferRef(t)
+    });
+    return { replayed: false, transfer: transferRef(t) };
+  });
+}
+
 /* ===================== 出库(必须持有当前质权人放行) ===================== */
 function deliver(input) {
   return transact((s, tx) => {
@@ -965,13 +1346,38 @@ function deliver(input) {
 function pledgeView(s, p) {
   const r = s.receipts.find((x) => x.id === p.receiptId);
   const exposure = exposureOf(p);
+  const pendingTransfer = pendingTransferOf(s, p.id);
   return {
     ...p,
     exposure,
     collateralRatio: exposure > 0 ? round3(p.currentValue / exposure) : null,
     canPubliclyClaimEffective: p.status === 'REGISTERED' || p.status === 'SUPPLEMENTING',
     receiptCurrentVersion: r ? r.version : null,
-    versionStale: r ? r.version !== p.receiptVersion : null
+    versionStale: r ? r.version !== p.receiptVersion : null,
+    rightsVersion: p.rightsVersion || 1,
+    pendingTransfer: pendingTransfer
+      ? {
+          id: pendingTransfer.id,
+          fromFinancerId: pendingTransfer.fromFinancerId,
+          toFinancerId: pendingTransfer.toFinancerId,
+          status: pendingTransfer.status,
+          confirmedFrom: pendingTransfer.confirmedFrom,
+          confirmedTo: pendingTransfer.confirmedTo
+        }
+      : null
+  };
+}
+
+function transferView(s, t) {
+  const pledge = s.pledges.find((p) => p.id === t.pledgeId);
+  const from = s.parties.find((x) => x.id === t.fromFinancerId);
+  const to = s.parties.find((x) => x.id === t.toFinancerId);
+  return {
+    ...t,
+    fromFinancerName: from ? from.name : t.fromFinancerId,
+    toFinancerName: to ? to.name : t.toFinancerId,
+    pledgeStatusNow: pledge ? pledge.status : null,
+    currentFinancerId: pledge ? pledge.financerId : null
   };
 }
 
@@ -999,6 +1405,7 @@ function receiptView(s, r) {
           id: pledge.id,
           status: pledge.status,
           financerId: pledge.financerId,
+          rightsVersion: pledge.rightsVersion || 1,
           registrationNo: pledge.registration ? pledge.registration.registrationNo : null,
           canPubliclyClaimEffective: pledgeView(s, pledge).canPubliclyClaimEffective
         }
@@ -1062,12 +1469,47 @@ function auditSnapshot() {
     .filter((p) => p.publicClaimAllowed && p.status === 'LOCKED')
     .map((p) => ({ pledgeId: p.id, receiptId: p.receiptId }));
 
+  // I8 质权转让交接审计:
+  //  - 任一质押至多一笔待确认转让(I8-1)
+  //  - 已生效转让指向的当前质权人必须是受让机构,且权利版本已前进
+  //  - 已生效放行单(未用罄)不得与存续质押共存(生效闸口 I8-4)
+  const transferViolations = [];
+  const gT = {};
+  s.transfers.filter((t) => t.status === TRANSFER_PENDING).forEach((t) => ((gT[t.pledgeId] ||= []).push(t)));
+  Object.entries(gT).forEach(([pid, list]) => {
+    if (list.length > 1) transferViolations.push({ kind: 'MULTIPLE_PENDING_TRANSFERS', pledgeId: pid, transferIds: list.map((t) => t.id) });
+  });
+  for (const t of s.transfers) {
+    const p = s.pledges.find((x) => x.id === t.pledgeId);
+    if (!p) continue;
+    if (t.status === TRANSFER_EFFECTIVE) {
+      // 历史生效单的受让方可能已被后续再次交接(链式转让/回转)覆盖;
+      // 只有该质押「最近一笔生效转让」的受让方必须等于当前权利人
+      const laterEffective = s.transfers.some(
+        (x) => x.pledgeId === t.pledgeId && x.status === TRANSFER_EFFECTIVE &&
+          (x.effectiveAt > t.effectiveAt || (x.effectiveAt === t.effectiveAt && x.id > t.id))
+      );
+      if (!laterEffective && p.financerId !== t.toFinancerId)
+        transferViolations.push({ kind: 'EFFECTIVE_TRANSFER_HOLDER_MISMATCH', pledgeId: p.id, transferId: t.id, financerId: p.financerId });
+      // 生效时权利版本必须确实前进,且记录值与质押当前权利版本链衔接
+      if (t.rightsVersionAfter != null && t.rightsVersionAfter <= t.expectedRightsVersion)
+        transferViolations.push({ kind: 'RIGHTS_VERSION_NOT_ADVANCED', pledgeId: p.id, transferId: t.id });
+    }
+  }
   const chain = verifyChain(s);
   return {
     chain,
     overlaps,
     doubleFinancing,
     prematureClaims,
+    transfers: {
+      total: s.transfers.length,
+      pending: s.transfers.filter((t) => t.status === TRANSFER_PENDING).length,
+      withdrawn: s.transfers.filter((t) => t.status === TRANSFER_WITHDRAWN).length,
+      effective: s.transfers.filter((t) => t.status === TRANSFER_EFFECTIVE).length,
+      rejected: s.transfers.filter((t) => t.status === TRANSFER_REJECTED).length,
+      violations: transferViolations
+    },
     operations: {
       total: s.operationRecords.length,
       success: s.operationRecords.filter((o) => o.outcome === 'SUCCESS').length,
@@ -1082,6 +1524,8 @@ function auditSnapshot() {
       supplements: s.supplements.filter((x) => x.status === 'OPEN').length,
       releases: s.releases.length,
       deliveries: s.deliveries.length,
+      transfers: s.transfers.length,
+      pendingTransfers: s.transfers.filter((t) => t.status === TRANSFER_PENDING).length,
       operations: s.operationRecords.length,
       events: s.events.length
     }
@@ -1102,6 +1546,7 @@ function query() {
     supplements: s.supplements,
     releases: s.releases,
     deliveries: s.deliveries,
+    transfers: s.transfers.map((t) => transferView(s, t)),
     events: s.events,
     operations: s.operationRecords.map((o) => operationView(s, o)),
     policy: { ltv: LTV_POLICY },
@@ -1162,6 +1607,16 @@ function sessionView(sessionId) {
     .map((o) => operationView(s, o));
   const pledgeIds = new Set(ops.map((o) => o.pledgeId).filter(Boolean));
   const receiptIds = new Set(ops.map((o) => o.receiptId).filter(Boolean));
+  // 转让操作直接关联到的质押/转让单也纳入会话台账(即便该质押并非本会话创建)
+  ops.forEach((o) => {
+    if (o.ref && o.ref.transferId) {
+      const t = s.transfers.find((x) => x.id === o.ref.transferId);
+      if (t) { pledgeIds.add(t.pledgeId); receiptIds.add(t.receiptId); }
+    }
+  });
+  const transfers = s.transfers
+    .filter((t) => pledgeIds.has(t.pledgeId) || ops.some((o) => o.ref && o.ref.transferId === t.id))
+    .map((t) => transferView(s, t));
   const pledges = s.pledges
     .filter((p) => pledgeIds.has(p.id) || (p.financerId && ops.some((o) => o.actorId === p.financerId)))
     .map((p) => pledgeView(s, p));
@@ -1196,7 +1651,7 @@ function sessionView(sessionId) {
     rebuiltAt: Date.now(),
     counts,
     steps,
-    ledger: { pledges, receipts, releases, supplements },
+    ledger: { pledges, receipts, releases, supplements, transfers },
     chainHead: s.events.length ? s.events[s.events.length - 1].hash : 'GENESIS'
   };
 }
@@ -1215,6 +1670,17 @@ function queryOperations(filter = {}) {
   if (filter.action) ops = ops.filter((o) => o.action === filter.action);
   if (filter.outcome) ops = ops.filter((o) => o.outcome === filter.outcome);
   return ops.sort((a, b) => a.seq - b.seq).map((o) => operationView(s, o));
+}
+
+/** 转让单查询:按质押/参与方/状态过滤,按申请发生顺序返回(监管/工作台恢复用) */
+function queryTransfers(filter = {}) {
+  const s = getState();
+  let list = [...s.transfers];
+  if (filter.pledgeId) list = list.filter((t) => t.pledgeId === filter.pledgeId);
+  if (filter.receiptId) list = list.filter((t) => t.receiptId === filter.receiptId);
+  if (filter.partyId) list = list.filter((t) => t.fromFinancerId === filter.partyId || t.toFinancerId === filter.partyId);
+  if (filter.status) list = list.filter((t) => t.status === filter.status);
+  return list.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).map((t) => transferView(s, t));
 }
 
 module.exports = {
@@ -1239,12 +1705,16 @@ module.exports = {
   supplementCollateral,
   repayPledge,
   releasePledge,
+  applyTransfer,
+  confirmTransfer,
+  withdrawTransfer,
   deliver,
   query,
   auditSnapshot,
   receiptTimeline,
   sessionView,
   queryOperations,
+  queryTransfers,
   valuationFor,
   exposureOf
 };

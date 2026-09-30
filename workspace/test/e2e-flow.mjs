@@ -95,7 +95,7 @@ async function main() {
     ok('仓库端「登记仓单」按钮已绑定事件', typeof wh.byId('btn-register').onclick === 'function');
     ok('融资方端「锁定质押」按钮已绑定事件', typeof finBoot.byId('btn-lock').onclick === 'function');
     const reg = createBrowser(BASE); reg.load('common.js'); reg.load('regulator.js'); await reg.flush(150);
-    ok('监管端首屏权利链验签通过(统计卡渲染)', reg.byId('stats').querySelectorAll('.card').length === 10);
+    ok('监管端首屏权利链验签通过(统计卡渲染)', reg.byId('stats').querySelectorAll('.card').length === 12);
     /* ============ B. 三页串联:建仓单 → 锁定 → 登记 → 清偿 → 授权 → 出库 → 监管可见 ============ */
     console.log('\n=== B. 三页串联(仓库建单 → 金融锁定/登记/清偿/授权 → 仓库出库 → 监管留痕)===');
     const vb = (await get('/api/state')).valuationBatches[0].id;
@@ -402,6 +402,156 @@ async function main() {
     ok('最终权利链验签通过', audit.chain.ok);
     ok('无一单多质 / 无区间重叠 / 无提前宣称',
       audit.doubleFinancing.length === 0 && audit.overlaps.length === 0 && audit.prematureClaims.length === 0);
+
+    /* ============ F. 质权转让与交接:页面发起/双方确认/撤回/越权/刷新恢复/监管回放 ============ */
+    console.log('\n=== F. 质权转让与交接(页面级串联:申请→双方确认→生效;撤回/越权/刷新恢复)===');
+    // 后端准备两张已登记质押(ICBC):F1 走完整生效;F2 走撤回
+    const mkRegisteredPledge = async (loc, qty, loan) => {
+      const w = await call('/api/receipts/register', {
+        actorId: 'WH-1', locationId: loc, gradeId: loc === 'LOC-B1' ? 'AL-A' : 'CU-A', holderId: 'ENT-HONGTAI', qty
+      });
+      const l = await call('/api/pledges/lock', {
+        reqId: rid('LKTR'), actorId: 'FIN-ICBC', financerId: 'FIN-ICBC', receiptId: w.id,
+        valuationBatchId: vb, loanAmount: loan, sessionId: 'SES-E2E-TRANSFER'
+      });
+      await call('/api/pledges/register', {
+        actorId: 'FIN-ICBC', pledgeId: l.pledge.id, registrationNo: regNo(), expectedVersion: 1, sessionId: 'SES-E2E-TRANSFER'
+      });
+      return { receiptId: w.id, pledgeId: l.pledge.id, reg: (await get('/api/state')).pledges.find((p) => p.id === l.pledge.id).registration };
+    };
+    const F1 = await mkRegisteredPledge('LOC-A1', 200, 1000000);
+    const F2 = await mkRegisteredPledge('LOC-A2', 150, 800000);
+
+    const trPage = createBrowser(BASE);
+    trPage.localStorage.set('ewr-financier-session', 'SES-E2E-TRANSFER');
+    trPage.load('common.js'); trPage.load('financier.js'); await trPage.flush(150);
+    await trPage.evalInPage('refresh()'); await trPage.flush(200);
+
+    // F1-a 页面表单发起转让
+    trPage.byId('tf-pledge').value = F1.pledgeId;
+    trPage.evalInPage('renderTransferForm()');
+    trPage.byId('tf-to').value = 'FIN-CMB';
+    await trPage.click(trPage.byId('btn-transfer-apply'));
+    await trPage.flush(200);
+    ok('页面发起转让成功并提示双方确认', /转让申请 TR\d{4} 已发起/.test(lastToast(trPage)), lastToast(trPage));
+    const t1 = (await get('/api/state')).transfers.filter((x) => x.pledgeId === F1.pledgeId && x.status === 'PENDING').pop();
+    ok('后端存在 PENDING 转让且锁定 r1', !!t1 && t1.fromFinancerId === 'FIN-ICBC' && t1.toFinancerId === 'FIN-CMB' && t1.expectedRightsVersion === 1);
+    const T1 = t1.id;
+
+    // F1-b 非参与方确认(页面演练按钮):明确 FORBIDDEN,状态不变
+    await trPage.evalInPage(`confirmTransfer_('${T1}','ENT-HONGTAI','from')`);
+    await trPage.flush(200);
+    ok('非参与方页面确认显示 FORBIDDEN 原文', /不是转让/.test(lastToast(trPage)) && /可确认/.test(lastToast(trPage)), lastToast(trPage));
+
+    // F1-c 原质权人重复确认两次:第一次成功、第二次 ALREADY_CONFIRMED
+    await trPage.evalInPage(`confirmTransfer_('${T1}','FIN-ICBC','from')`);
+    await trPage.flush(200);
+    ok('原质权人确认提示等待受让', /等待受让机构确认/.test(lastToast(trPage)), lastToast(trPage));
+    await trPage.evalInPage(`confirmTransfer_('${T1}','FIN-ICBC','from')`);
+    await trPage.flush(200);
+    ok('同一方重复确认显示 ALREADY_CONFIRMED 原文', /已确认过/.test(lastToast(trPage)), lastToast(trPage));
+
+    // F1-d 浏览器刷新:新页面上下文从后端恢复同一转让进度
+    const trFresh = createBrowser(BASE);
+    trFresh.localStorage.set('ewr-financier-session', 'SES-E2E-TRANSFER');
+    trFresh.load('common.js'); trFresh.load('financier.js'); await trFresh.flush(200);
+    const trTblHtml = trFresh.byId('tbl-transfers').innerHTML;
+    ok('刷新后转让台账从后端恢复:展示待确认状态与双方动作',
+      trTblHtml.includes(T1) && trTblHtml.includes('待确认'), 'trTbl missing ' + T1);
+    ok('刷新后显示原质权人已确认、受让待确认', trTblHtml.includes('已确认') && /受让机构[\s\S]*待确认/.test(trTblHtml));
+    ok('刷新后仍展示「受让机构确认」动作按钮', !!trFresh.find((el) => el.tag === 'button' && el.attrs.onclick?.includes(`'${T1}'`) && el.attrs.onclick.includes("'to'")));
+
+    // F1-e 受让机构确认 → 生效
+    await trFresh.evalInPage(`confirmTransfer_('${T1}','FIN-CMB','to')`);
+    await trFresh.flush(200);
+    ok('页面提示质权已交接', /通过生效闸口,质权已交接/.test(lastToast(trFresh)), lastToast(trFresh));
+    const f1Pledge = (await get('/api/state')).pledges.find((p) => p.id === F1.pledgeId);
+    ok('后端权利人切换为 FIN-CMB、r2', f1Pledge.financerId === 'FIN-CMB' && f1Pledge.rightsVersion === 2);
+    ok('原登记凭证三要素不被改写',
+      f1Pledge.registration.registrationNo === F1.reg.registrationNo &&
+      f1Pledge.registration.registeredAt === F1.reg.registeredAt &&
+      f1Pledge.registration.receiptVersion === F1.reg.receiptVersion);
+
+    // F1-f 旧质权人切换后再放行/清偿:页面 api 得到 FORBIDDEN 原文
+    const oldRelease = await pageReject(trFresh, {
+      path: '/api/pledges/release',
+      body: { reqId: rid('RL'), actorId: 'FIN-ICBC', pledgeId: F1.pledgeId, qty: 10, sessionId: 'SES-E2E-TRANSFER' }
+    });
+    ok('切换后旧质权人放行显示 FORBIDDEN', oldRelease && oldRelease.code === 'FORBIDDEN' && /FIN-CMB/.test(oldRelease.message), oldRelease?.message);
+    const oldRepay = await pageReject(trFresh, {
+      path: '/api/pledges/repay',
+      body: { pledgeId: F1.pledgeId, actorId: 'FIN-ICBC', amount: 10, sessionId: 'SES-E2E-TRANSFER' }
+    });
+    ok('切换后旧质权人清偿显示 FORBIDDEN', oldRepay && oldRepay.code === 'FORBIDDEN', oldRepay?.message);
+    // 新质权人可继续处理
+    const newRepay = await call('/api/pledges/repay', { pledgeId: F1.pledgeId, actorId: 'FIN-CMB', amount: 10, sessionId: 'SES-E2E-TRANSFER' });
+    ok('新质权人可继续处理原质押(还款)', newRepay.financerId === 'FIN-CMB' && newRepay.coveredAmount === 10);
+
+    // F2 撤回路径:发起 → 受让撤回 → 状态已撤回、权利人不变;重新发起可生效
+    await trPage.evalInPage('refresh()'); await trPage.flush(200);
+    trPage.byId('tf-pledge').value = F2.pledgeId;
+    trPage.evalInPage('renderTransferForm()');
+    trPage.byId('tf-to').value = 'FIN-CMB';
+    await trPage.click(trPage.byId('btn-transfer-apply'));
+    await trPage.flush(200);
+    const t2 = (await get('/api/state')).transfers.filter((x) => x.pledgeId === F2.pledgeId && x.status === 'PENDING').pop();
+    const T2 = t2.id;
+    await trPage.evalInPage(`withdrawTransfer_('${T2}','FIN-CMB')`);
+    await trPage.flush(200);
+    ok('页面撤回成功提示权利人不变', /转让已撤回,当前权利人不变/.test(lastToast(trPage)), lastToast(trPage));
+    let f2Pledge = (await get('/api/state')).pledges.find((p) => p.id === F2.pledgeId);
+    const t2after = (await get('/api/state')).transfers.find((x) => x.id === T2);
+    ok('撤回后申请 WITHDRAWN、权利人仍 ICBC', t2after.status === 'WITHDRAWN' && f2Pledge.financerId === 'FIN-ICBC');
+    // 撤回后重新发起,双方确认生效
+    await trPage.evalInPage('refresh()'); await trPage.flush(150);
+    trPage.byId('tf-pledge').value = F2.pledgeId;
+    trPage.evalInPage('renderTransferForm()');
+    trPage.byId('tf-to').value = 'FIN-CMB';
+    await trPage.click(trPage.byId('btn-transfer-apply'));
+    await trPage.flush(200);
+    const t3 = (await get('/api/state')).transfers.filter((x) => x.pledgeId === F2.pledgeId && x.status === 'PENDING').pop();
+    ok('撤回后可重新发起(新转让号)', t3.id !== T2);
+    await trPage.evalInPage(`confirmTransfer_('${t3.id}','FIN-ICBC','from')`);
+    await trPage.flush(150);
+    await trPage.evalInPage(`confirmTransfer_('${t3.id}','FIN-CMB','to')`);
+    await trPage.flush(200);
+    f2Pledge = (await get('/api/state')).pledges.find((p) => p.id === F2.pledgeId);
+    ok('重新发起后双方确认生效、切换 FIN-CMB', f2Pledge.financerId === 'FIN-CMB' && f2Pledge.rightsVersion === 2, lastToast(trPage));
+
+    // F3 并发发起两笔转让(页面演练按钮)
+    const F3w = await call('/api/receipts/register', { actorId: 'WH-1', locationId: 'LOC-A1', gradeId: 'CU-A', holderId: 'ENT-HONGTAI', qty: 80 });
+    const F3l = await call('/api/pledges/lock', { reqId: rid('LKTR'), actorId: 'FIN-ICBC', financerId: 'FIN-ICBC', receiptId: F3w.id, valuationBatchId: vb, loanAmount: 500000, sessionId: 'SES-E2E-TRANSFER' });
+    await call('/api/pledges/register', { actorId: 'FIN-ICBC', pledgeId: F3l.pledge.id, registrationNo: regNo(), expectedVersion: 1, sessionId: 'SES-E2E-TRANSFER' });
+    await trPage.evalInPage('refresh()'); await trPage.flush(200);
+    trPage.byId('tf-pledge').value = F3l.pledge.id;
+    trPage.evalInPage('renderTransferForm()');
+    await trPage.evalInPage(`scenarioTransferRace('${F3l.pledge.id}')`);
+    await trPage.flush(400);
+    ok('并发两笔转让页面显示:一笔待确认、第二笔 TRANSFER_ALREADY_PENDING 原文',
+      /并发转让结果/.test(lastToast(trPage)) && /已有待确认转让/.test(lastToast(trPage)), lastToast(trPage));
+    ok('后端仅一笔 PENDING(无双重权利人)',
+      (await get('/api/state')).transfers.filter((x) => x.pledgeId === F3l.pledge.id && x.status === 'PENDING').length === 1);
+
+    // F4 监管端:转让表按序展示四态、审计无违规、操作回放含申请/确认/生效
+    const regTr = createBrowser(BASE); regTr.load('common.js'); regTr.load('regulator.js'); await regTr.flush(250);
+    ok('监管端转让回放表含全部转让单(生效×2/撤回×1/待确认×1 等)',
+      regTr.byId('tbl-transfers').innerHTML.includes(T1) &&
+      regTr.byId('tbl-transfers').innerHTML.includes(T2) &&
+      regTr.byId('tbl-transfers').innerHTML.includes(t3.id));
+    ok('监管端转让审计面板无双重权利人/重复生效', /无双重权利人\/重复生效/.test(regTr.byId('audit-transfer').innerHTML));
+    await regTr.evalInPage('loadOperations()'); await regTr.flush(200);
+    const trOps = await get('/api/operations?pledgeId=' + F1.pledgeId);
+    const trSeq = trOps.map((o) => o.action);
+    ok('监管按质押回放顺序:申请 → 确认(生效) → 旧质权人拒绝留痕',
+      trSeq.indexOf('transferApply') < trSeq.indexOf('transferConfirm') &&
+      trOps.some((o) => o.action === 'transferConfirm' && /切换/.test(o.reason || '')) &&
+      trOps.some((o) => o.outcome === 'REJECTED' && o.reasonCode === 'FORBIDDEN'));
+    const fAudit = await get('/api/audit');
+    ok('转让审计计数正确(生效≥2、撤回≥1、待确认≥1)且无违规',
+      fAudit.transfers.effective >= 2 && fAudit.transfers.withdrawn >= 1 && fAudit.transfers.pending >= 1 &&
+      fAudit.transfers.violations.length === 0, JSON.stringify(fAudit.transfers));
+    ok('转让全部操作后权利链仍验签通过、无一单多质',
+      fAudit.chain.ok && fAudit.doubleFinancing.length === 0);
 
     console.log(`\n================ 端到端:${passed} 通过,${fails.length} 失败 ================`);
     if (fails.length) { console.log('失败项:', fails); process.exitCode = 1; }

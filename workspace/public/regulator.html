@@ -43,6 +43,19 @@
       <div class="scenario" id="audit-double"></div>
       <div class="scenario" id="audit-claim"></div>
     </div>
+    <div class="grid cols-3" style="margin-top:12px">
+      <div class="scenario" id="audit-transfer"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🔁 质权转让与交接回放(申请 → 双方确认 → 生效 / 撤回 / 拒绝,严格按序)</h2>
+    <div class="table-wrap" style="max-height:340px">
+      <table id="tbl-transfers"><thead><tr>
+        <th>转让号 / 质权版本</th><th>时间</th><th>质押 / 仓单</th><th>原质权人 → 受让机构</th>
+        <th>状态</th><th>双方确认</th><th>结论 / 拒绝原因</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
   </div>
 
   <div class="card" style="margin-top:16px">
@@ -71,6 +84,9 @@
           <option value="supplement">补充担保</option>
           <option value="repay">还款</option>
           <option value="release">质权人放行</option>
+          <option value="transferApply">质权转让申请</option>
+          <option value="transferConfirm">质权转让确认</option>
+          <option value="transferWithdraw">撤回质权转让</option>
         </select>
       </label>
     </div>

@@ -12,10 +12,16 @@ const EVENT_CN = {
   PLEDGE_LOCKED: '质押锁定', PLEDGE_CANCELLED: '质押撤回', PLEDGE_REGISTERED: '质押登记',
   PLEDGE_REVALUED: '担保重估', SUPPLEMENT_REQUESTED: '补充担保要求', COLLATERAL_SUPPLEMENTED: '补充担保到账',
   LOAN_REPAID: '偿还融资', RELEASE_GRANTED: '质权人放行', PLEDGE_CLOSED: '担保结清归档',
+  PLEDGE_TRANSFER_APPLIED: '质权转让申请', PLEDGE_TRANSFER_CONFIRMED: '转让双方确认',
+  PLEDGE_TRANSFER_WITHDRAWN: '转让撤回', PLEDGE_TRANSFER_EFFECTIVE: '质权交接生效',
+  PLEDGE_TRANSFER_REJECTED: '转让生效拒绝',
   VALUATION_BATCH_CREATED: '估值批次发布', ATTEMPT_LOGGED: '操作留痕'
 };
 
-const ACTION_CN = { lock: '锁仓', register: '质押登记', cancel: '撤回锁定', supplement: '补充担保', repay: '还款', release: '质权人放行' };
+const ACTION_CN = {
+  lock: '锁仓', register: '质押登记', cancel: '撤回锁定', supplement: '补充担保', repay: '还款', release: '质权人放行',
+  transferApply: '质权转让申请', transferConfirm: '质权转让确认', transferWithdraw: '撤回质权转让'
+};
 
 async function load() {
   STATE = await getState();
@@ -23,6 +29,7 @@ async function load() {
   renderStats();
   renderBatches();
   renderAudit();
+  renderTransfers();
   renderReceipts();
   renderEvents();
   loadOperations();
@@ -52,6 +59,7 @@ function renderStats() {
   const items = [
     ['有效仓单', c.validReceipts], ['质押总额笔数', c.pledges], ['存续质押', c.activePledges],
     ['待补充担保', c.supplements], ['放行单', c.releases], ['出库单', c.deliveries],
+    ['转让申请', c.transfers], ['待确认转让', c.pendingTransfers],
     ['操作总步次', o.total], ['成功 / 冲突', `${o.success} / ${o.conflict}`], ['被拒绝', o.rejected],
     ['链上事件', c.events]
   ];
@@ -83,6 +91,11 @@ function opRefCell(o) {
     return `<b class="mono">${esc(r.registrationNo)}</b><div class="small muted">${esc(r.registrar || '登记中心')} · v${r.receiptVersion}</div>`;
   if (r.token)
     return `<b class="mono">${esc(r.token)}</b><div class="small muted">${esc(r.releaseId)} · ${fmtNum(r.qty)}吨 / 余 ${fmtNum(r.remaining)}吨</div>`;
+  if (r.transferId) {
+    const map = { PENDING: '待确认', WITHDRAWN: '已撤回', EFFECTIVE: '已生效', REJECTED: '已拒绝' };
+    return `<span class="small mono">${esc(r.transferId)}</span> <b>${map[r.status] || r.status}</b>
+      <div class="small muted">${esc(r.fromFinancerId)} → ${esc(r.toFinancerId)} · 原${r.confirmedFrom ? '✔' : '·'}/受${r.confirmedTo ? '✔' : '·'}${r.rejectCode ? ' · ' + esc(r.rejectCode) : ''}</div>`;
+  }
   if (r.pledgeId) return `<span class="small mono">${esc(r.pledgeId)}</span>`;
   return '<span class="muted small">—</span>';
 }
@@ -114,6 +127,27 @@ function renderBatches() {
     <td class="small">${fmtTime(b.createdAt)}</td></tr>`).join('');
 }
 
+/* ----------------------------- 质权转让交接回放 ----------------------------- */
+function renderTransfers() {
+  const tb = document.querySelector('#tbl-transfers tbody');
+  const rows = [...STATE.transfers].sort((a, b) => b.createdAt - a.createdAt);
+  tb.innerHTML = rows.map((t) => `<tr>
+    <td><b>${t.id}</b><div class="small muted mono">r${t.expectedRightsVersion}</div></td>
+    <td class="small">${fmtTime(t.createdAt)}${t.effectiveAt ? `<br>生效 ${fmtTime(t.effectiveAt)}` : ''}${t.withdrawnAt ? `<br>撤回 ${fmtTime(t.withdrawnAt)}` : ''}</td>
+    <td class="mono small">${t.pledgeId}<br>${t.receiptId}</td>
+    <td class="small">${esc(t.fromFinancerName)}<br>→ ${esc(t.toFinancerName)}<div class="small ${t.currentFinancerId === t.toFinancerId ? 'tag-good' : 'muted'}">当前:${esc(t.currentFinancerId || '—')}</div></td>
+    <td>${badge(t.status)}${t.rejectCode ? `<div class="small tag-bad">${esc(t.rejectCode)}</div>` : ''}</td>
+    <td class="small">原 ${t.confirmedFrom ? '✔' : '·'}<br>受 ${t.confirmedTo ? '✔' : '·'}
+      <div class="muted">${(t.confirmations || []).map((c) => (c.side === 'from' ? '原' : '受') + '@' + fmtTime(c.at)).join('<br>')}</div></td>
+    <td class="small muted">${esc(t.rejectReason || (t.status === 'WITHDRAWN' ? (esc(nameOfStatic(t.withdrawnBy)) + ' 撤回,权利人不变') : (t.status === 'EFFECTIVE' ? '双方确认且通过闸口,已切换' : '—')))}</td>
+  </tr>`).join('') || '<tr><td colspan="7" class="muted">暂无质权转让申请</td></tr>';
+}
+
+function nameOfStatic(id) {
+  const p = STATE.parties.find((x) => x.id === id);
+  return p ? p.name : id;
+}
+
 function renderAudit() {
   const a = STATE.audit;
   const overlap = document.getElementById('audit-overlap');
@@ -133,6 +167,14 @@ function renderAudit() {
     (a.prematureClaims.length
       ? `<div class="tag-bad">发现 ${a.prematureClaims.length} 起</div>` + a.prematureClaims.map((x) => `<div class="small mono">${x.pledgeId} @ ${x.receiptId}</div>`).join('')
       : '<div class="tag-good">✔ 无提前宣称</div><div class="small muted">所有可对外主张的担保均已登记</div>');
+
+  const tr = document.getElementById('audit-transfer');
+  const v = a.transfers;
+  tr.innerHTML = `<b>④ 质权转让交接</b><div class="hr" style="margin:6px 0"></div>` +
+    `<div class="small">待确认 <b>${v.pending}</b> · 已撤回 <b>${v.withdrawn}</b> · 已生效 <b>${v.effective}</b> · 已拒绝 <b>${v.rejected}</b></div>` +
+    (v.violations.length
+      ? `<div class="tag-bad">发现 ${v.violations.length} 项异常</div>` + v.violations.map((x) => `<div class="small mono">${x.kind}: ${x.pledgeId}</div>`).join('')
+      : '<div class="tag-good">✔ 无双重权利人/重复生效</div><div class="small muted">每笔质押至多一笔待确认转让;生效后权利人即受让机构</div>');
 }
 
 function renderReceipts() {
@@ -188,6 +230,7 @@ window.lineage = async (id) => {
       ${o.reasonCode ? `<div class="small"><b>${esc(o.reasonCode)}</b>:${esc(o.reason || '')}</div>` : ''}
       ${o.ref && o.ref.registrationNo ? `<div class="small tag-good">登记回执号:${esc(o.ref.registrationNo)} @ ${fmtTime(o.ref.registeredAt)}(仓单 v${o.ref.receiptVersion})</div>` : ''}
       ${o.ref && o.ref.token ? `<div class="small tag-good">放行令牌:${esc(o.ref.token)}(${esc(o.ref.releaseId)},${fmtNum(o.ref.qty)} 吨,余 ${fmtNum(o.ref.remaining)} 吨)</div>` : ''}
+      ${o.ref && o.ref.transferId ? `<div class="small ${o.ref.status === 'EFFECTIVE' ? 'tag-good' : o.ref.status === 'REJECTED' ? 'tag-bad' : ''}">转让 ${esc(o.ref.transferId)}:${esc(o.ref.fromFinancerId)} → ${esc(o.ref.toFinancerId)} [${esc(o.ref.status)}] 原${o.ref.confirmedFrom ? '✔' : '·'}/受${o.ref.confirmedTo ? '✔' : '·'}${o.ref.rejectCode ? ' ' + esc(o.ref.rejectCode) : ''}</div>` : ''}
     </li>`).join('');
   openModal(`
     <h2>权属穿透 · ${id}</h2>

@@ -161,6 +161,67 @@ async function main() {
     tl.operations.some((o) => o.ref && o.ref.registrationNo === regNo) &&
     tl.operations.some((o) => o.ref && o.ref.token === expected.token));
 
+  console.log('\n=== 质权转让进行中宕机 → 重启恢复同一进度并继续交接 ===');
+  // 新登记一笔已登记质押(WR0003 上有一笔 LOCKED,另用一张新仓单)
+  const wTr = await call('/api/receipts/register', { actorId: 'WH-1', locationId: 'LOC-A2', gradeId: 'CU-A', holderId: 'ENT-HONGTAI', qty: 300 });
+  const lkTr = await call('/api/pledges/lock', { reqId: 'TR-LOCK-0001', actorId: 'FIN-ICBC', financerId: 'FIN-ICBC', receiptId: wTr.id, valuationBatchId: vb, loanAmount: 10000000, sessionId: SESSION });
+  const P_TR = lkTr.pledge.id;
+  await call('/api/pledges/register', { actorId: 'FIN-ICBC', pledgeId: P_TR, registrationNo: 'TR-REG-0001', expectedVersion: 1, sessionId: SESSION });
+  const regTrBefore = (await get('/api/state')).pledges.find((p) => p.id === P_TR).registration;
+  const trApply = await call('/api/pledges/transfers/apply', { reqId: 'TR-APPLY-0001', actorId: 'FIN-ICBC', pledgeId: P_TR, toFinancerId: 'FIN-CMB', sessionId: SESSION });
+  const TR_ID = trApply.transfer.transferId;
+  await call('/api/pledges/transfers/confirm', { reqId: 'TR-CONF-FROM', transferId: TR_ID, actorId: 'FIN-ICBC', sessionId: SESSION });
+  // 宕机前:仅原质权人确认,申请 PENDING
+  const trBefore = (await get('/api/state')).transfers.find((t) => t.id === TR_ID);
+  ok('宕机前转让 PENDING 且原质权人已确认、权利人未切换',
+    trBefore.status === 'PENDING' && trBefore.confirmedFrom === true && trBefore.confirmedTo === false &&
+    (await get('/api/state')).pledges.find((p) => p.id === P_TR).financerId === 'FIN-ICBC');
+  const trHeadBefore = (await get('/api/state')).audit.chain.head;
+
+  srv.kill('SIGKILL');
+  await new Promise((r) => srv.on('exit', r));
+  await waitReady(false);
+
+  srv = startServer();
+  if (!(await waitReady(true))) throw new Error('服务重启超时');
+
+  const afterTrState = await get('/api/state');
+  const trAfter = afterTrState.transfers.find((t) => t.id === TR_ID);
+  const pTrAfter = afterTrState.pledges.find((p) => p.id === P_TR);
+  ok('转让申请随盘恢复:同一申请号、PENDING、确认进度不丢',
+    trAfter.status === 'PENDING' && trAfter.confirmedFrom === true && trAfter.confirmedTo === false &&
+    trAfter.expectedRightsVersion === 1 && pTrAfter.currentTransferId === TR_ID);
+  ok('宕机期间权利人不变(仍 FIN-ICBC)、原登记凭证不变',
+    pTrAfter.financerId === 'FIN-ICBC' &&
+    pTrAfter.registration.registrationNo === 'TR-REG-0001' &&
+    pTrAfter.registration.registeredAt === regTrBefore.registeredAt);
+  ok('权利链链头与宕机前一致', afterTrState.audit.chain.head === trHeadBefore && afterTrState.audit.chain.ok);
+
+  // 重启后:受让机构确认 → 生效;旧质权人重复确认/放行均被明确拒绝
+  const conf2 = await call('/api/pledges/transfers/confirm', { reqId: 'TR-CONF-TO', transferId: TR_ID, actorId: 'FIN-CMB', sessionId: SESSION });
+  ok('重启后续作:受让确认即生效,无重复生效', conf2.effective === true && conf2.transfer.status === 'EFFECTIVE');
+  const pTrEff = (await get('/api/state')).pledges.find((p) => p.id === P_TR);
+  ok('重启后交接完成:权利人 FIN-CMB、r2、原登记凭证三要素不变',
+    pTrEff.financerId === 'FIN-CMB' && pTrEff.rightsVersion === 2 &&
+    pTrEff.registration.registrationNo === 'TR-REG-0001' &&
+    pTrEff.registration.registeredAt === regTrBefore.registeredAt &&
+    pTrEff.registration.receiptVersion === regTrBefore.receiptVersion);
+  // 宕机前的确认 reqId 重启后重放:返回同一申请 EFFECTIVE,不重复确认/不重复生效
+  const replayFromConf = await call('/api/pledges/transfers/confirm', { reqId: 'TR-CONF-FROM', transferId: TR_ID, actorId: 'FIN-ICBC', sessionId: SESSION }).catch((e) => ({ __err: e.code }));
+  ok('宕机前确认 reqId 重启后重放不产生第二次生效(终态明确)',
+    replayFromConf.__err === 'TRANSFER_EFFECTIVE' || (replayFromConf.replayed === true && replayFromConf.transfer.status === 'EFFECTIVE'),
+    JSON.stringify(replayFromConf).slice(0, 120));
+  // 转让申请/确认幂等表随盘恢复
+  const replayApply = await call('/api/pledges/transfers/apply', { reqId: 'TR-APPLY-0001', actorId: 'FIN-ICBC', pledgeId: P_TR, toFinancerId: 'FIN-CMB', sessionId: SESSION });
+  ok('相同转让申请 reqId 重启后重放:返回原申请(已生效),不产生第二笔',
+    replayApply.replayed === true && replayApply.transfer.transferId === TR_ID && replayApply.transfer.status === 'EFFECTIVE');
+  ok('全程仅一笔转让申请(无双重权利人)', (await get('/api/state')).transfers.filter((t) => t.pledgeId === P_TR).length === 1);
+  const trOps = await get('/api/operations?pledgeId=' + P_TR);
+  ok('转让操作留痕随盘恢复并可按序回放(申请→双方确认→生效)',
+    trOps.some((o) => o.action === 'transferApply') &&
+    trOps.filter((o) => o.action === 'transferConfirm' && o.outcome === 'SUCCESS').length >= 2 &&
+    trOps.some((o) => o.reason && /切换/.test(o.reason || '')));
+
   srv.kill('SIGTERM');
   await new Promise((r) => srv.on('exit', r));
   rmSync(DB_FILE, { force: true });

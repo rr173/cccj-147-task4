@@ -104,7 +104,11 @@ const STATUS_BADGE = {
   RELEASED: ['gray', '已解除'],
   CANCELLED: ['gray', '已撤回'],
   OPEN: ['red', '待补充'],
-  SATISFIED: ['green', '已弥补']
+  SATISFIED: ['green', '已弥补'],
+  PENDING: ['amber', '待确认'],
+  WITHDRAWN: ['gray', '已撤回'],
+  EFFECTIVE: ['green', '已生效'],
+  REJECTED: ['red', '已拒绝']
 };
 
 function badge(status) {

@@ -38,7 +38,7 @@ class DomainError extends Error {
 
 function freshState() {
   return {
-    seq: { receipt: 0, event: 0, batch: 0, pledge: 0, valuation: 0, release: 0, delivery: 0, operation: 0 },
+    seq: { receipt: 0, event: 0, batch: 0, pledge: 0, valuation: 0, release: 0, delivery: 0, operation: 0, transfer: 0 },
     commodities: [], // {id,name,unit}
     grades: [],      // {id,commodityId,name,basePrice}
     locations: [],   // {id,warehouseId,name,capacity,commodityId}
@@ -50,6 +50,7 @@ function freshState() {
     releases: [],    // 放行单
     deliveries: [],  // 出库记录
     supplements: [], // 补充担保要求
+    transfers: [],   // 质权转让申请(PENDING/WITHDRAWN/EFFECTIVE/REJECTED,双方确认后生效)
     operationRecords: [], // 融资方操作会话留痕(成功/冲突/拒绝,与业务事务同提交;失败单独留痕)
     idempotency: {}, // key -> 回执对象
     events: []       // append-only 权利链
@@ -91,7 +92,9 @@ function load() {
     state = Object.assign(freshState(), parsed);
     if (!state.idempotency) state.idempotency = {};
     if (!Array.isArray(state.operationRecords)) state.operationRecords = [];
+    if (!Array.isArray(state.transfers)) state.transfers = [];
     if (!state.seq.operation) state.seq.operation = state.operationRecords.length;
+    if (!state.seq.transfer) state.seq.transfer = state.transfers.length;
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
     state = freshState();

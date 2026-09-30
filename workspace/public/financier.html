@@ -98,6 +98,33 @@
   </div>
 
   <div class="card" style="margin-top:16px">
+    <h2>🔁 质权转让与交接(原质权人与受让机构双方确认;刷新/重启后从后端恢复进度)
+      <span style="margin-left:auto" class="row-actions">
+        <button class="ghost" onclick="scenarioTransferRace()">并发发起两笔转让(演练)</button>
+      </span>
+    </h2>
+    <div class="form-row">
+      <label class="fld">已登记存续质押
+        <select id="tf-pledge"></select>
+      </label>
+      <label class="fld">受让机构
+        <select id="tf-to"></select>
+      </label>
+      <button class="primary" id="btn-transfer-apply">发起转让申请</button>
+    </div>
+    <p class="small muted" style="margin-top:8px">
+      申请须双方<b>分别确认</b>;任一方撤回、重复确认或基于旧质权版本提交都不会改变当前权利人。
+      仅在双方确认且质押<b>尚未清偿、无生效放行单</b>时才切换权利人;切换后旧质权人不能再登记、清偿或放行,
+      新质权人沿用原质押(原登记凭证不变)。</p>
+    <div class="table-wrap" style="margin-top:10px">
+      <table id="tbl-transfers"><thead><tr>
+        <th>转让号</th><th>质押 / 仓单</th><th>原质权人 → 受让机构</th><th>状态</th>
+        <th>双方确认</th><th style="min-width:320px">双方动作</th><th>结论 / 拒绝原因</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
     <h2>📒 质押台账 <button style="margin-left:auto" id="btn-refresh">刷新</button></h2>
     <div class="table-wrap">
       <table id="tbl-pledges">

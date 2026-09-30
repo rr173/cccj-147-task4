@@ -22,7 +22,10 @@ const REQ_FIELDS = {
   cancel: ['pledgeId', 'actorId'],
   supplement: ['pledgeId', 'amount', 'actorId'],
   repay: ['pledgeId', 'amount', 'actorId'],
-  release: ['reqId', 'pledgeId', 'qty']
+  release: ['reqId', 'pledgeId', 'qty'],
+  transferApply: ['reqId', 'pledgeId', 'actorId', 'toFinancerId', 'expectedRightsVersion', 'note'],
+  transferConfirm: ['reqId', 'transferId', 'pledgeId', 'actorId', 'side', 'expectedRightsVersion'],
+  transferWithdraw: ['reqId', 'transferId', 'pledgeId', 'actorId']
 };
 
 function guard(action, fn) {
@@ -37,6 +40,10 @@ function guard(action, fn) {
         if (!receiptId && pledgeId) {
           const p = getState().pledges.find((x) => x.id === pledgeId);
           if (p) receiptId = p.receiptId;
+        }
+        if (input.transferId) {
+          const t = getState().transfers.find((x) => x.id === input.transferId);
+          if (t) { pledgeId = pledgeId || t.pledgeId; if (!receiptId) receiptId = t.receiptId; }
         }
         const idempotencyKey = domain.IDEMPOTENCY_KEY_OF[action]
           ? domain.IDEMPOTENCY_KEY_OF[action](input)
@@ -114,6 +121,13 @@ const routes = {
       action: query.get('action') || undefined,
       outcome: query.get('outcome') || undefined
     }),
+  'GET /api/transfers': async (body, query) =>
+    domain.queryTransfers({
+      pledgeId: query.get('pledgeId') || undefined,
+      receiptId: query.get('receiptId') || undefined,
+      partyId: query.get('partyId') || undefined,
+      status: query.get('status') || undefined
+    }),
   'GET /api/receipt': async (body, query) => {
     const id = query.get('id');
     if (!id) throw new DomainError('ID_REQUIRED', '缺少 id');
@@ -131,6 +145,9 @@ const routes = {
   'POST /api/pledges/supplement': guard('supplement', (b) => domain.supplementCollateral(b)),
   'POST /api/pledges/repay': guard('repay', (b) => domain.repayPledge(b)),
   'POST /api/pledges/release': guard('release', (b) => domain.releasePledge(b)),
+  'POST /api/pledges/transfers/apply': guard('transferApply', (b) => domain.applyTransfer(b)),
+  'POST /api/pledges/transfers/confirm': guard('transferConfirm', (b) => domain.confirmTransfer(b)),
+  'POST /api/pledges/transfers/withdraw': guard('transferWithdraw', (b) => domain.withdrawTransfer(b)),
   'POST /api/admin/reset': async () => {
     seed();
     return { ok: true, message: '已重置为演示数据' };
