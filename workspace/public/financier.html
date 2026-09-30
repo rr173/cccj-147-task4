@@ -93,7 +93,48 @@
             <button class="danger" onclick="scenarioReplay()">登记 → 同回执再放一次</button>
           </div>
         </div>
+        <div class="scenario">
+          <b>④ 质权转让对抗(并发两笔 / 重复确认 / 非参与方 / 生效前放行)</b>
+          <p>对一笔已登记质押:并发发起两笔转让申请;同一方重复确认;非参与方确认;双方确认生效前旧质权人放行。
+            全部返回明确结果,不产生双重权利人、不重复生效、不改写原登记凭证。</p>
+          <div class="row-actions">
+            <select id="transfer-pledge"></select>
+            <button class="danger" onclick="scenarioTransfer()">质权转让对抗演练</button>
+          </div>
+        </div>
       </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🔁 质权转让与交接(双方分别确认 · 撤回 / 待确认 / 已生效全程可恢复)</h2>
+    <div class="form-row" style="margin-bottom:10px">
+      <label class="fld">当前操作机构(以该身份提交申请/确认/撤回/放行)
+        <select id="t-actor"></select>
+      </label>
+      <label class="fld" style="max-width:260px">目标存续质押(须已登记、未清偿)
+        <select id="t-pledge"></select>
+      </label>
+      <label class="fld" style="max-width:220px">受让机构
+        <select id="t-assignee"></select>
+      </label>
+      <label class="fld" style="max-width:150px">申请基于质押版本
+        <input id="t-version" type="number" placeholder="默认当前版本">
+      </label>
+      <button class="primary" id="btn-transfer-apply">发起转让申请</button>
+    </div>
+    <p class="small muted" style="margin:0 0 10px">
+      申请由原质权人与受让机构<b>分别确认</b>同一申请;任一方撤回、重复确认、基于旧质押版本提交均不切换权利人;
+      双方确认且质押<b>尚未清偿、无生效(未核销)放行单</b>时才交接。生效后旧质权人不能再登记/清偿/放行,新质权人继续处理原质押。
+    </p>
+    <div class="table-wrap">
+      <table id="tbl-transfers">
+        <thead><tr>
+          <th>转让单号</th><th>质押/仓单</th><th>原质权人 → 受让机构</th><th>申请基于版本</th>
+          <th>双方确认</th><th>状态</th><th style="min-width:300px">双方动作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
   </div>
 

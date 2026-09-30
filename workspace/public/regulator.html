@@ -38,10 +38,11 @@
 
   <div class="card" style="margin-top:16px">
     <h2>🚨 合规审计</h2>
-    <div class="grid cols-3">
+    <div class="grid cols-2">
       <div class="scenario" id="audit-overlap"></div>
       <div class="scenario" id="audit-double"></div>
       <div class="scenario" id="audit-claim"></div>
+      <div class="scenario" id="audit-handoff"></div>
     </div>
   </div>
 
@@ -71,6 +72,10 @@
           <option value="supplement">补充担保</option>
           <option value="repay">还款</option>
           <option value="release">质权人放行</option>
+          <option value="transfer-apply">发起质权转让</option>
+          <option value="transfer-confirm">确认质权转让</option>
+          <option value="transfer-withdraw">撤回质权转让</option>
+          <option value="transfer-effective">质权交接生效</option>
         </select>
       </label>
     </div>

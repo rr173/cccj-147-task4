@@ -22,8 +22,16 @@ let stepFilter = 'all';
 
 document.getElementById('topbar').innerHTML = renderTopbar('fin');
 
-const ACTION_CN = { lock: '锁仓', register: '质押登记', cancel: '撤回锁定', supplement: '补充担保', repay: '还款', release: '质权人放行' };
-const IDEMPOTENCY_FIELDS = { lock: 'reqId', register: 'registrationNo', release: 'reqId' };
+const ACTION_CN = {
+  lock: '锁仓', register: '质押登记', cancel: '撤回锁定', supplement: '补充担保', repay: '还款',
+  release: '质权人放行',
+  'transfer-apply': '发起质权转让', 'transfer-confirm': '确认质权转让',
+  'transfer-withdraw': '撤回质权转让', 'transfer-effective': '质权交接生效'
+};
+const IDEMPOTENCY_FIELDS = {
+  lock: 'reqId', register: 'registrationNo', release: 'reqId',
+  'transfer-apply': 'reqId', 'transfer-confirm': 'reqId'
+};
 
 async function refresh(showToast = false) {
   STATE = await getState();
@@ -35,6 +43,8 @@ async function refresh(showToast = false) {
   renderPledges();
   renderSupplements();
   renderReleases();
+  renderTransfers();
+  renderTransferControls();
   renderScenarioSelects();
 }
 
@@ -65,9 +75,12 @@ async function reconcileDrafts(announce) {
 /** repay/supplement/cancel 无幂等键:用台账状态判断之前的提交是否已生效,绝不自动补发 */
 function inferKeylessStep(d) {
   const p = SESSION.ledger.pledges.find((x) => x.id === d.pledgeId);
-  if (!p) return false;
-  if (d.action === 'cancel') return p.status === 'CANCELLED';
-  if (d.action === 'repay' || d.action === 'supplement') return (p.coveredAmount || 0) > (d.beforeCovered || 0) + 1e-6;
+  if (d.action === 'cancel') return !!p && p.status === 'CANCELLED';
+  if (d.action === 'repay' || d.action === 'supplement') return !!p && (p.coveredAmount || 0) > (d.beforeCovered || 0) + 1e-6;
+  if (d.action === 'transfer-withdraw') {
+    const t = SESSION.ledger.transfers.find((x) => x.id === d.body.transferId);
+    return !!t && (t.status === 'WITHDRAWN' || t.status === 'EFFECTIVE');
+  }
   return false;
 }
 
@@ -78,15 +91,28 @@ function currentDrafts() {
 /** 统一执行一个质押操作步骤:登记草稿 → 请求 → 按响应决定草稿去向 */
 async function runStep(action, path, body, opts = {}) {
   const keyField = IDEMPOTENCY_FIELDS[action];
-  if (keyField && body[keyField] == null) body[keyField] = action === 'register' ? genRegNo() : genReqId(action === 'lock' ? 'LOCK' : 'REL');
+  if (keyField && body[keyField] == null) {
+    if (action === 'register') body[keyField] = genRegNo();
+    else if (action === 'lock') body[keyField] = genReqId('LOCK');
+    else if (action === 'transfer-apply') body[keyField] = genReqId('TRANSFER-APPLY');
+    else if (action === 'transfer-confirm') body[keyField] = genReqId('TRANSFER-CONFIRM');
+    else body[keyField] = genReqId('REL');
+  }
   const idempotencyKey = {
     lock: 'pledge-lock:' + body.reqId,
     register: 'register:' + body.registrationNo,
-    release: 'release:' + body.reqId
+    release: 'release:' + body.reqId,
+    'transfer-apply': 'transfer-apply:' + body.reqId,
+    'transfer-confirm': 'transfer-confirm:' + body.reqId
   }[action] || null;
   body.sessionId = sessionId;
 
-  const pledge = STATE.pledges.find((p) => p.id === body.pledgeId);
+  // 转让类请求只带 transferId,草稿仍需记录质押/仓单以便步骤表与会话重建
+  const pledgeFromTransfer = body.transferId
+    ? STATE.transfers.find((t) => t.id === body.transferId)
+    : null;
+  const pledge = STATE.pledges.find((p) => p.id === body.pledgeId) ||
+    (pledgeFromTransfer ? STATE.pledges.find((p) => p.id === pledgeFromTransfer.pledgeId) : null);
   const draft = {
     sessionId,
     action,
@@ -95,8 +121,9 @@ async function runStep(action, path, body, opts = {}) {
     body,
     idempotencyKey,
     at: Date.now(),
-    pledgeId: body.pledgeId || null,
-    receiptId: body.receiptId || (pledge ? pledge.receiptId : null),
+    pledgeId: body.pledgeId || (pledge ? pledge.id : null) || (pledgeFromTransfer ? pledgeFromTransfer.pledgeId : null),
+    receiptId: body.receiptId || (pledge ? pledge.receiptId : null) || (pledgeFromTransfer ? pledgeFromTransfer.receiptId : null),
+    transferId: body.transferId || (action === 'transfer-apply' ? null : null),
     beforeCovered: pledge ? pledge.coveredAmount || 0 : 0
   };
   saveDrafts([...loadDrafts(), draft]);
@@ -149,7 +176,7 @@ function renderSession() {
     <dl class="kv">
       <dt>会话号</dt><dd class="mono">${esc(sessionId)}</dd>
       <dt>服务端重建时刻</dt><dd>${fmtTime(SESSION.rebuiltAt)} · 链头 <span class="chain-line">${esc(String(SESSION.chainHead).slice(0, 24))}…</span></dd>
-      <dt>台账</dt><dd>质押 <b>${SESSION.ledger.pledges.length}</b> 笔 · 放行单 <b>${SESSION.ledger.releases.length}</b> 张 · 补充要求 <b>${SESSION.ledger.supplements.length}</b> 条</dd>
+      <dt>台账</dt><dd>质押 <b>${SESSION.ledger.pledges.length}</b> 笔 · 放行单 <b>${SESSION.ledger.releases.length}</b> 张 · 补充要求 <b>${SESSION.ledger.supplements.length}</b> 条 · 转让 <b>${SESSION.ledger.transfers.length}</b> 笔(待确认 ${SESSION.ledger.transfers.filter((t) => t.status === 'PENDING').length})</dd>
       <dt>步骤结论</dt><dd>${outcomeBadge('SUCCESS')} ${c.success} · ${outcomeBadge('CONFLICT')} ${c.conflict} · ${outcomeBadge('REJECTED')} ${c.rejected} · ${outcomeBadge('PENDING')} ${pending.length}</dd>
     </dl>
     ${pending.length ? `<div class="banner warn" style="margin-top:10px">有 <b>${pending.length}</b> 个步骤未收到服务端确认。已用幂等键自动核对;核对不到的步骤只能「同键重发」,不会生成第二笔质押/登记/放行。</div>` : ''}`;
@@ -181,6 +208,17 @@ function refSummary(step) {
     return `<span class="tag-good">登记回执号 ${esc(r.registrationNo)}</span><div class="small muted">${esc(r.registrar || '登记中心')} @ ${fmtTime(r.registeredAt)} · 仓单 v${r.receiptVersion}</div>`;
   if (r.token)
     return `<span class="tag-good">放行令牌 ${esc(r.token)}</span><div class="small muted">${esc(r.releaseId)} · ${fmtNum(r.qty)} 吨 · 余 ${fmtNum(r.remaining)} 吨</div>`;
+  if (r.transferId) {
+    const cb = r.confirmedBy || {};
+    const cbTxt = Object.entries(cb).map(([k, v]) => `${esc(k)}:${v ? '✔' : '○'}`).join(' · ');
+    const head = `<span class="${r.status === 'EFFECTIVE' ? 'tag-good' : r.status === 'WITHDRAWN' ? 'muted' : ''}">转让单 ${esc(r.transferId)} → ${badge(r.status)}</span>`;
+    const detail = `<div class="small muted">${esc(r.fromFinancerId)} → ${esc(r.toFinancerId)} · 确认 ${cbTxt}${r.effectiveAt ? ' · 生效 ' + fmtTime(r.effectiveAt) : ''}${r.withdrawnBy ? ' · ' + esc(r.withdrawnBy) + ' 撤回' : ''}</div>`;
+    if (step.action === 'transfer-effective')
+      return `<span class="tag-good">质权交接生效 ${esc(r.transferId)}</span>${detail}<div class="small tag-good">原登记凭证不变,旧质权人处分权终止</div>`;
+    if (r.confirmation)
+      return `${head}<div class="small muted">${esc(r.confirmation.party)} 已确认 @ ${fmtTime(r.confirmation.at)}</div>`;
+    return head + detail;
+  }
   if (step.action === 'lock')
     return `质押 ${esc(r.pledgeId)} · 锁定 v${r.receiptVersion} · 批次 ${esc(r.valuationBatchId)}`;
   if (r.status)
@@ -253,6 +291,12 @@ function renderScenarioSelects() {
   document.getElementById('race-receipt').innerHTML = valid.length
     ? valid.map((r) => `<option value="${r.id}">${r.id} · ${fmtNum(r.qty)}吨 · 无质押</option>`).join('')
     : '<option value="">(无未质押仓单,可先重置数据)</option>';
+  const transferable = STATE.pledges.filter((p) =>
+    ['REGISTERED', 'SUPPLEMENTING'].includes(p.status) && p.exposure > 0 &&
+    !STATE.transfers.some((t) => t.pledgeId === p.id && t.status === 'PENDING'));
+  document.getElementById('transfer-pledge').innerHTML = transferable.length
+    ? transferable.map((p) => `<option value="${p.id}">${p.id} @ ${p.receiptId} · 现质权人 ${p.financerId} · v${p.version}</option>`).join('')
+    : '<option value="">(无已登记、未清偿且无在途转让的质押)</option>';
 }
 
 function renderPledges() {
@@ -263,8 +307,14 @@ function renderPledges() {
     const claimCell = p.canPubliclyClaimEffective
       ? '<div class="small tag-good">✓ 可对外主张担保生效</div>'
       : '<div class="small" style="color:#b45309">🔒 未登记,不得对外宣称生效</div>';
+    const transferCell = p.pendingTransfer
+      ? `<div class="small" style="color:#b45309">🔁 转让 ${esc(p.pendingTransfer.id)} 待确认(${esc(p.pendingTransfer.financerId)}→${esc(p.pendingTransfer.newFinancerId)})</div>`
+      : (p.transferCount
+        ? `<div class="small muted">已交接 ${p.transferCount} 次 · 质押 v${p.version}</div>`
+        : '');
+    const canTransfer = ['REGISTERED', 'SUPPLEMENTING'].includes(p.status) && p.exposure > 0;
     return `<tr>
-      <td><b>${p.id}</b>${p.registration ? `<div class="small muted mono">${esc(p.registration.registrationNo)}</div>` : ''}</td>
+      <td><b>${p.id}</b>${p.registration ? `<div class="small muted mono">${esc(p.registration.registrationNo)}</div>` : ''}${transferCell}</td>
       <td>${p.receiptId}<div class="small ${stale ? 'tag-bad' : 'muted'}">锁 v${p.receiptVersion} / 当前 v${p.receiptCurrentVersion}${stale ? ' · 仓单已变更' : ''}</div></td>
       <td>${esc(nameOf(p.financerId))}<div class="small muted">出质:${esc(nameOf(p.pledgorId))}</div></td>
       <td>${fmtMoney(p.loanAmount)}<div class="small muted">率上限 ${Math.round(p.ltvCap / p.lockedValue * 100)}%</div></td>
@@ -278,6 +328,7 @@ function renderPledges() {
         ${['REGISTERED', 'SUPPLEMENTING', 'LOCKED'].includes(p.status) ? `<button onclick="askRepay('${p.id}')">还款</button>` : ''}
         ${['REGISTERED', 'SUPPLEMENTING'].includes(p.status) ? `<button onclick="askRelease('${p.id}')">放行出库</button>` : ''}
         ${p.status === 'SUPPLEMENTING' ? `<button class="danger" onclick="askSupplement('${p.id}')">补充担保</button>` : ''}
+        ${canTransfer ? `<button onclick="askTransfer('${p.id}')">质权转让</button>` : ''}
         <button class="ghost" onclick="showPledge('${p.id}')">详情</button>
       </div></td>
     </tr>`;
@@ -305,6 +356,167 @@ function nameOf(id) {
   const p = STATE.parties.find((x) => x.id === id);
   return p ? p.name : id;
 }
+
+/* ------------------------------- 质权转让与交接 ------------------------------- */
+function renderTransferControls() {
+  const actor = document.getElementById('t-actor');
+  if (!actor.dataset.init) {
+    actor.innerHTML = STATE.parties.filter((p) => p.type === 'financer')
+      .map((p) => `<option value="${p.id}">${esc(p.name)}(${p.id})</option>`).join('');
+    actor.dataset.init = '1';
+  }
+  const assignee = document.getElementById('t-assignee');
+  const prevA = assignee.value;
+  assignee.innerHTML = STATE.parties.filter((p) => p.type === 'financer')
+    .map((p) => `<option value="${p.id}">${esc(p.name)}(${p.id})</option>`).join('');
+  if (prevA) assignee.value = prevA;
+
+  const sel = document.getElementById('t-pledge');
+  const prev = sel.value;
+  const candidates = STATE.pledges.filter((p) =>
+    ['REGISTERED', 'SUPPLEMENTING'].includes(p.status) && p.exposure > 0);
+  sel.innerHTML = candidates.length
+    ? candidates.map((p) => `<option value="${p.id}">${p.id} @ ${p.receiptId} · 现质权人 ${esc(p.financerId)} · 质押 v${p.version} · 敞口 ${fmtMoney(p.exposure)}</option>`).join('')
+    : '<option value="">(无已登记且未清偿的存续质押)</option>';
+  if (prev && candidates.some((p) => p.id === prev)) sel.value = prev;
+  // 默认受让机构:自动取与当前质权人不同的一家,并把版本框同步为当前质押版本
+  const chosen = candidates.find((p) => p.id === sel.value);
+  if (chosen) {
+    const samePicked = assignee.value === chosen.financerId;
+    if (samePicked) {
+      const other = STATE.parties.find((p) => p.type === 'financer' && p.id !== chosen.financerId);
+      if (other) assignee.value = other.id;
+    }
+    const ver = document.getElementById('t-version');
+    if (document.activeElement !== ver || ver.dataset.auto !== '0') ver.value = chosen.version;
+  }
+}
+
+function confirmMarks(t) {
+  const mark = (id) => (t.confirmedBy[id] ? '<span class="tag-good">✔ 已确认</span>' : '<span class="muted">○ 待确认</span>');
+  return `<div class="small">${esc(t.financerId)}(原):${mark(t.financerId)}</div>
+          <div class="small">${esc(t.newFinancerId)}(受让):${mark(t.newFinancerId)}</div>`;
+}
+
+function renderTransfers() {
+  const tb = document.querySelector('#tbl-transfers tbody');
+  const rows = [...STATE.transfers].sort((a, b) => b.appliedAt - a.appliedAt);
+  tb.innerHTML = rows.map((t) => {
+    const pledge = STATE.pledges.find((p) => p.id === t.pledgeId);
+    const isParty = (id) => id === t.financerId || id === t.newFinancerId;
+    const actorId = document.getElementById('t-actor').value;
+    let actions = '';
+    if (t.status === 'PENDING') {
+      const canConfirm = isParty(actorId) && !t.confirmedBy[actorId];
+      actions = `<button class="primary" onclick="askTransferConfirm('${t.id}')" ${canConfirm ? '' : 'disabled'}>以当前机构确认</button>
+        <button class="danger" onclick="doTransferWithdraw('${t.id}')" ${isParty(actorId) ? '' : 'disabled'}>撤回</button>
+        ${!isParty(actorId) ? '<div class="small muted">当前机构非该转让参与方</div>' : (t.confirmedBy[actorId] ? '<div class="small muted">当前机构已确认,不可重复确认</div>' : '')}`;
+    } else if (t.status === 'EFFECTIVE') {
+      actions = `<span class="tag-good">✔ 已交接</span>
+        <div class="small muted">${fmtTime(t.effectiveAt)} · ${esc(t.financerId)} 已丧失登记/清偿/放行权</div>`;
+    } else {
+      actions = `<span class="muted">已于 ${fmtTime(t.withdrawnAt)} 由 ${esc(t.withdrawnBy)} 撤回</span>
+        <div class="small muted">当前权利人不变(${esc(pledge ? pledge.financerId : t.financerId)}),可重新发起</div>`;
+    }
+    return `<tr>
+      <td><b>${t.id}</b><div class="small muted">申请 ${fmtTime(t.appliedAt)} · ${esc(t.appliedBy)}</div></td>
+      <td class="mono small">${t.pledgeId}<br>${t.receiptId}</td>
+      <td>${esc(nameOf(t.financerId))}<div class="small muted">↓</div>${esc(nameOf(t.newFinancerId))}</td>
+      <td class="mono small">质押 v${t.pledgeVersion}${pledge ? ` / 当前 v${pledge.version}` : ''}${pledge && pledge.version !== t.pledgeVersion ? '<div class="tag-bad">已交接过,此为历史申请</div>' : ''}</td>
+      <td>${confirmMarks(t)}</td>
+      <td>${badge(t.status)}</td>
+      <td><div class="row-actions">${actions}</div></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted">暂无质权转让申请</td></tr>';
+}
+
+document.getElementById('btn-transfer-apply').onclick = async () => {
+  const pledgeId = document.getElementById('t-pledge').value;
+  const newFinancerId = document.getElementById('t-assignee').value;
+  const actorId = document.getElementById('t-actor').value;
+  const vRaw = document.getElementById('t-version').value.trim();
+  if (!pledgeId) return toast('请选择已登记且未清偿的存续质押', 'error');
+  const p = STATE.pledges.find((x) => x.id === pledgeId);
+  if (actorId !== p.financerId && actorId !== newFinancerId)
+    return toast(`只有原质权人 ${p.financerId} 或受让机构 ${newFinancerId} 本人能发起这笔申请`, 'error', 6000);
+  try {
+    const data = await runStep('transfer-apply', '/api/pledges/transfer-apply', {
+      pledgeId, newFinancerId, actorId,
+      expectedVersion: vRaw === '' ? p.version : Number(vRaw)
+    });
+    if (data.replayed) toast('相同转让申请重放:返回既有转让单,未产生第二笔在途转让', 'error', 6000);
+    else toast(`转让申请 ${data.transfer.id} 已发起(${data.transfer.financerId} → ${data.transfer.newFinancerId})\n待双方分别确认;任一方撤回或仅一方确认都不切换权利人。`, 'success', 7000);
+  } catch (e) { /* runStep 已提示 */ }
+};
+
+window.askTransfer = (pledgeId) => {
+  const p = STATE.pledges.find((x) => x.id === pledgeId);
+  const others = STATE.parties.filter((x) => x.type === 'financer' && x.id !== p.financerId);
+  openModal(`
+    <h2>发起质权转让 · ${pledgeId}</h2>
+    <dl class="kv">
+      <dt>当前质权人</dt><dd>${esc(nameOf(p.financerId))}(交接后丧失该质押的登记/清偿/放行权)</dd>
+      <dt>受让机构</dt><dd><select id="tr-assignee">${others.map((o) => `<option value="${o.id}">${esc(o.name)}(${o.id})</option>`).join('')}</select></dd>
+      <dt>申请基于质押版本</dt><dd>v${p.version}(旧版本提交将被拒绝 STALE_PLEDGE_VERSION)</dd>
+      <dt>生效前置</dt><dd class="small">双方分别确认;质押未清偿;无生效(未核销)放行单。满足后才切换,原登记凭证不变。</dd>
+    </dl>
+    <div class="hr"></div>
+    <div class="row-actions">
+      <button class="primary" onclick="doTransferFromPledge('${pledgeId}', '${p.financerId}')">以原质权人 ${esc(p.financerId)} 发起</button>
+      <button onclick="closeModal()">取消</button>
+    </div>`);
+};
+window.doTransferFromPledge = async (pledgeId, fromId) => {
+  const p = STATE.pledges.find((x) => x.id === pledgeId);
+  const newFinancerId = document.getElementById('tr-assignee').value;
+  try {
+    const data = await runStep('transfer-apply', '/api/pledges/transfer-apply', {
+      pledgeId, newFinancerId, actorId: fromId, expectedVersion: p.version
+    });
+    toast(`转让申请 ${data.transfer.id} 已发起,等待双方确认`, 'success');
+    closeModal();
+  } catch (e) { /* 已提示 */ }
+};
+
+window.askTransferConfirm = (transferId) => {
+  const t = STATE.transfers.find((x) => x.id === transferId);
+  const actorId = document.getElementById('t-actor').value;
+  const other = actorId === t.financerId ? t.newFinancerId : t.financerId;
+  const willEffect = !t.confirmedBy[other];
+  openModal(`
+    <h2>确认质权转让 · ${transferId}</h2>
+    <dl class="kv">
+      <dt>质押 / 仓单</dt><dd>${t.pledgeId} / ${t.receiptId}(质押 v${t.pledgeVersion})</dd>
+      <dt>原质权人</dt><dd>${esc(nameOf(t.financerId))} ${t.confirmedBy[t.financerId] ? '✔ 已确认' : '○ 待确认'}</dd>
+      <dt>受让机构</dt><dd>${esc(nameOf(t.newFinancerId))} ${t.confirmedBy[t.newFinancerId] ? '✔ 已确认' : '○ 待确认'}</dd>
+      <dt>本次确认方</dt><dd><b>${esc(nameOf(actorId))}</b></dd>
+      <dt>生效判定</dt><dd class="small">${willEffect
+        ? '本次为最后一方确认:提交瞬间再校验「未清偿 + 无生效放行单」,满足即切换权利人。'
+        : `对方 ${esc(other)} 尚未确认,本次仅记录本方确认,权利人暂不切换。`}</dd>
+    </dl>
+    <div class="hr"></div>
+    <button class="primary" onclick="doTransferConfirm('${transferId}','${actorId}')">提交本方确认</button>
+    <button onclick="closeModal()">取消</button>`);
+};
+window.doTransferConfirm = async (transferId, actorId) => {
+  try {
+    const data = await runStep('transfer-confirm', '/api/pledges/transfer-confirm', { transferId, actorId });
+    if (data.replayed) { toast('相同确认请求重放:返回转让单既有状态,确认不重复生效', 'error', 6500); closeModal(); return; }
+    if (data.effective)
+      toast(`质权交接生效:${data.pledgeAfter.id} 权利人已切换为 ${data.pledgeAfter.financerId}(质押 v${data.pledgeAfter.version})\n原登记凭证不变;旧质权人不能再登记/清偿/放行。`, 'success', 8000);
+    else
+      toast('本方确认已记录;等待另一方确认后才会切换权利人', 'success', 6000);
+    closeModal();
+  } catch (e) { /* 已提示 */ }
+};
+
+window.doTransferWithdraw = async (transferId) => {
+  if (!confirm(`撤回转让申请 ${transferId}?撤回后当前权利人不变,须重新发起申请。`)) return;
+  try {
+    await runStep('transfer-withdraw', '/api/pledges/transfer-withdraw', { transferId });
+    toast('转让申请已撤回,当前权利人不变', 'success');
+  } catch (e) { /* 已提示 */ }
+};
 
 /* ------------------------------- 发起质押 ------------------------------- */
 document.getElementById('btn-lock').onclick = async () => {
@@ -455,6 +667,10 @@ window.showPledge = (id) => {
       <dt>当前担保值</dt><dd>${fmtMoney(p.currentValue)}(重估 ${p.revaluationCount || 0} 次)</dd>
       <dt>融资额 / 已覆盖</dt><dd>${fmtMoney(p.loanAmount)} / ${fmtMoney(p.coveredAmount)}</dd>
       <dt>登记回执</dt><dd class="mono">${p.registration ? esc(p.registration.registrationNo) + ' @ ' + fmtTime(p.registration.registeredAt) : '— 未登记 —'}</dd>
+      <dt>质押版本 / 交接次数</dt><dd>v${p.version || 1} · ${p.transferCount || 0} 次${p.pendingTransfer ? ` · 在途转让 ${esc(p.pendingTransfer.id)} 待确认` : ''}</dd>
+      <dt>质权交接历史</dt><dd>${(p.transferHistory && p.transferHistory.length)
+        ? p.transferHistory.map((h) => `<div class="small mono">${fmtTime(h.at)} · ${esc(h.fromFinancerId)} → ${esc(h.toFinancerId)} · ${esc(h.transferId)}(原回执 ${esc(h.registrationNo)} 保留)</div>`).join('')
+        : '<span class="muted small">无</span>'}</dd>
       <dt>对外效力</dt><dd>${p.canPubliclyClaimEffective ? '<span class="tag-good">登记生效,可对外主张</span>' : '<span style="color:#b45309">未登记,不得宣称担保生效</span>'}</dd>
     </dl>`);
 };
@@ -530,6 +746,94 @@ window.scenarioReplay = async () => {
   } catch (e) {
     toast('演练异常:' + e.message, 'error', 7000);
   }
+  refresh();
+};
+
+// ④ 质权转让对抗:并发两笔申请 / 同一确认重复提交 / 非参与方确认 / 生效前旧质权人放行
+window.scenarioTransfer = async () => {
+  const pledgeId = document.getElementById('transfer-pledge').value;
+  if (!pledgeId) return toast('请选择一笔已登记、未清偿且无在途转让的质押', 'error');
+  const p = STATE.pledges.find((x) => x.id === pledgeId);
+  const from = p.financerId;
+  const to = STATE.parties.find((x) => x.type === 'financer' && x.id !== from).id;
+  const outsider = STATE.parties.find((x) => x.type === 'enterprise').id;
+  const log = [];
+  const note = (m) => log.push(m);
+
+  // (1) 并发发起两笔转让申请(不同 reqId):仅第一笔成立
+  const [t1, t2] = await Promise.allSettled([
+    api('/api/pledges/transfer-apply', { reqId: genReqId('TRANSFER-APPLY'), actorId: from, pledgeId, newFinancerId: to, expectedVersion: p.version, sessionId }),
+    api('/api/pledges/transfer-apply', { reqId: genReqId('TRANSFER-APPLY'), actorId: from, pledgeId, newFinancerId: to, expectedVersion: p.version, sessionId })
+  ]);
+  if (t1.status === 'fulfilled' && t2.status === 'rejected' && t2.reason.code === 'TRANSFER_ALREADY_OPEN')
+    note('✔ 并发两笔转让:第一笔 ' + t1.value.transfer.id + ' 成立,第二笔 TRANSFER_ALREADY_OPEN 被拒');
+  else note('✘ 并发转让结果异常');
+  const transferId = t1.value.transfer.id;
+
+  // (2) 非参与方确认
+  try {
+    await api('/api/pledges/transfer-confirm', { reqId: genReqId('TC'), actorId: outsider, transferId, sessionId });
+    note('✘ 非参与方确认竟然成功');
+  } catch (e) {
+    note(e.code === 'FORBIDDEN' ? '✔ 非参与方 ' + outsider + ' 确认被拒 FORBIDDEN' : '✘ 非参与方确认错误码 ' + e.code);
+  }
+
+  // (3) 原质权人确认,随后重复确认两次:一次相同 reqId(重放),一次新 reqId(重复确认)
+  const cReq = genReqId('TRANSFER-CONFIRM');
+  await api('/api/pledges/transfer-confirm', { reqId: cReq, actorId: from, transferId, sessionId });
+  const replay = await api('/api/pledges/transfer-confirm', { reqId: cReq, actorId: from, transferId, sessionId });
+  note(replay.replayed === true ? '✔ 同一确认再次提交(相同 reqId):replayed 返回既有状态,不重复生效' : '✘ 确认重放未识别');
+  try {
+    await api('/api/pledges/transfer-confirm', { reqId: genReqId('TC'), actorId: from, transferId, sessionId });
+    note('✘ 同一方重复确认竟然成功');
+  } catch (e) {
+    note(e.code === 'TRANSFER_ALREADY_CONFIRMED' ? '✔ 同一方换新 reqId 重复确认:TRANSFER_ALREADY_CONFIRMED,当前权利人不变' : '✘ 重复确认错误码 ' + e.code);
+  }
+
+  // (4) 生效前旧质权人放行
+  try {
+    await api('/api/pledges/release', { reqId: genReqId('REL'), actorId: from, pledgeId, qty: 5, sessionId });
+    note('✘ 交接生效前放行竟然成功');
+  } catch (e) {
+    note(e.code === 'TRANSFER_PENDING' ? '✔ 生效前旧质权人放行被拒 TRANSFER_PENDING' : '✘ 生效前放行错误码 ' + e.code);
+  }
+  const mid = (await getState()).pledges.find((x) => x.id === pledgeId);
+  note(mid.financerId === from && mid.version === p.version ? '✔ 此时权利人仍为 ' + from + ',质押版本未变' : '✘ 仅一方确认期间权利人被改写');
+
+  // (5) 基于旧质押版本确认(当前仍为同版本,用 v99 模拟陈旧版本)
+  try {
+    await api('/api/pledges/transfer-confirm', { reqId: genReqId('TC'), actorId: to, transferId, expectedVersion: 99, sessionId });
+    note('✘ 陈旧版本确认竟然成功');
+  } catch (e) {
+    note(e.code === 'STALE_PLEDGE_VERSION' ? '✔ 受让方基于旧质押版本确认被拒 STALE_PLEDGE_VERSION,申请不受影响' : '✘ 旧版本确认错误码 ' + e.code);
+  }
+
+  // (6) 受让方以当前版本确认 → 生效;再次确认得到 TRANSFER_ALREADY_EFFECTIVE
+  const eff = await api('/api/pledges/transfer-confirm', { reqId: genReqId('TC'), actorId: to, transferId, expectedVersion: p.version, sessionId });
+  note(eff.effective && eff.pledgeAfter.financerId === to && eff.pledgeAfter.version === p.version + 1
+    ? '✔ 双方确认齐备且无放行单:交接生效,权利人 ' + from + ' → ' + to + ',质押 v' + p.version + ' → v' + (p.version + 1)
+    : '✘ 生效结果异常');
+  try {
+    await api('/api/pledges/transfer-confirm', { reqId: genReqId('TC'), actorId: to, transferId, sessionId });
+    note('✘ 生效后确认竟然成功');
+  } catch (e) {
+    note(e.code === 'TRANSFER_ALREADY_EFFECTIVE' ? '✔ 生效后再确认:TRANSFER_ALREADY_EFFECTIVE,不重复生效' : '✘ 生效后确认错误码 ' + e.code);
+  }
+
+  // (7) 旧质权人登记 / 放行均被拒;新质权人可继续处理原质押
+  try {
+    await api('/api/pledges/release', { reqId: genReqId('REL'), actorId: from, pledgeId, qty: 5, sessionId });
+    note('✘ 旧质权人交接后放行竟然成功');
+  } catch (e) {
+    note(e.code === 'FORBIDDEN' ? '✔ 旧质权人交接后放行被拒 FORBIDDEN' : '✘ 旧质权人放行错误码 ' + e.code);
+  }
+  const now = (await getState()).pledges.find((x) => x.id === pledgeId);
+  note(now.registration.registrationNo === p.registration.registrationNo &&
+       now.registration.registeredAt === p.registration.registeredAt
+    ? '✔ 原登记凭证(回执号/登记时刻)未被改写' : '✘ 原登记凭证被改写');
+  note(now.financerId === to ? '✔ 全流程仅一个当前权利人:' + to + ',无双重权利人' : '✘ 出现双重权利人');
+
+  toast(log.join('\n'), 'success', 12000);
   refresh();
 };
 

@@ -255,6 +255,150 @@ async function main() {
   const bySession = await get('/api/session?sessionId=' + SES3);
   ok('会话视图可独立重建并发演练结果', bySession.counts.total === 2 && bySession.counts.conflict === 1);
 
+  console.log('\n=== 17. 质权转让与交接 (I8):双方确认 / 撤回 / 版本 / 闸门 / 权利切换 ===');
+  await call('/api/admin/reset');
+  const vbT = (await state()).valuationBatches[0].id;
+  const SES_T = 'SES-TRANSFER-' + Math.random().toString(36).slice(4, 9);
+  // 一笔已登记、未清偿的存续质押(ICBC),另有一张未质押仓单供排他校验
+  const tk = await call('/api/pledges/lock', { reqId: rid(), actorId: 'FIN-ICBC', financerId: 'FIN-ICBC', receiptId: 'WR0001', valuationBatchId: vbT, loanAmount: 40000000, sessionId: SES_T });
+  const P_T = tk.pledge.id;
+  await call('/api/pledges/register', { actorId: 'FIN-ICBC', pledgeId: P_T, registrationNo: regNo(), expectedVersion: 1, sessionId: SES_T });
+  const firstReg = (await state()).pledges.find((x) => x.id === P_T).registration;
+
+  // 未登记质押不可转让(新建一笔 LOCKED)
+  const lockedOnly = await call('/api/pledges/lock', { reqId: rid(), actorId: 'FIN-CMB', financerId: 'FIN-CMB', receiptId: 'WR0003', valuationBatchId: vbT, loanAmount: 10000000 });
+  await expectFail('未登记质押不能转让', 'PLEDGE_NOT_REGISTERED', () =>
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-CMB', pledgeId: lockedOnly.pledge.id, newFinancerId: 'FIN-ICBC', sessionId: SES_T }));
+  // 主体/参与方校验
+  await expectFail('受让方不能是仓库等非金融机构', 'BAD_ASSIGNEE', () =>
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, newFinancerId: 'WH-1' }));
+  await expectFail('非参与方不能发起转让', 'FORBIDDEN', () =>
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'ENT-HONGTAI', pledgeId: P_T, newFinancerId: 'FIN-CMB' }));
+  // 旧质押版本申请
+  await expectFail('基于旧质押版本申请被拒 STALE_PLEDGE_VERSION', 'STALE_PLEDGE_VERSION', () =>
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, newFinancerId: 'FIN-CMB', expectedVersion: 42 }));
+
+  // 并发发起两笔:仅一笔成立
+  const [ta, tb] = await Promise.allSettled([
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, newFinancerId: 'FIN-CMB', expectedVersion: 1, sessionId: SES_T }),
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, newFinancerId: 'FIN-CMB', expectedVersion: 1, sessionId: SES_T })
+  ]);
+  ok('并发两笔转让仅一笔成立', ta.status !== tb.status);
+  const loserT = ta.status === 'rejected' ? ta : tb;
+  ok('第二笔错误码 TRANSFER_ALREADY_OPEN', loserT.reason.code === 'TRANSFER_ALREADY_OPEN', loserT.reason.code);
+  const T1 = (ta.status === 'fulfilled' ? ta.value : tb.value).transfer.id;
+  const t1Init = (await state()).transfers.find((x) => x.id === T1);
+  ok('转让单初始:双方均未确认、PENDING、锁定质押 v1',
+    t1Init.status === 'PENDING' && t1Init.confirmedBy['FIN-ICBC'] === false && t1Init.confirmedBy['FIN-CMB'] === false && t1Init.pledgeVersion === 1);
+
+  // 非参与方确认 / 重复确认 / 重放
+  await expectFail('非参与方确认被拒 FORBIDDEN', 'FORBIDDEN', () =>
+    call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'ENT-HONGTAI', transferId: T1 }));
+  const cReq = 'TC-SMOKE-' + Math.random().toString(36).slice(4, 8);
+  const cFirst = await call('/api/pledges/transfer-confirm', { reqId: cReq, actorId: 'FIN-ICBC', transferId: T1, sessionId: SES_T });
+  ok('原质权人单方确认不生效', cFirst.effective === false);
+  const cReplay = await call('/api/pledges/transfer-confirm', { reqId: cReq, actorId: 'FIN-ICBC', transferId: T1, sessionId: SES_T });
+  ok('相同确认 reqId 重放返回 replayed', cReplay.replayed === true && cReplay.transfer.id === T1);
+  await expectFail('同一方换新 reqId 重复确认被拒', 'TRANSFER_ALREADY_CONFIRMED', () =>
+    call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-ICBC', transferId: T1 }));
+  await expectFail('基于旧质押版本确认被拒', 'STALE_PLEDGE_VERSION', () =>
+    call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-CMB', transferId: T1, expectedVersion: 7 }));
+  // 生效前旧质权人放行被拒
+  await expectFail('双方未齐前旧质权人放行被拒 TRANSFER_PENDING', 'TRANSFER_PENDING', () =>
+    call('/api/pledges/release', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, qty: 10 }));
+  const pMid1 = (await state()).pledges.find((x) => x.id === P_T);
+  ok('单方确认期间权利人/质押版本不变', pMid1.financerId === 'FIN-ICBC' && pMid1.version === 1);
+
+  // 受让方撤回:回到无在途,权利人不变
+  await call('/api/pledges/transfer-withdraw', { actorId: 'FIN-CMB', transferId: T1, sessionId: SES_T });
+  const stWd = await state();
+  const tWd = stWd.transfers.find((x) => x.id === T1);
+  const pWd = stWd.pledges.find((x) => x.id === P_T);
+  ok('撤回后转让单 WITHDRAWN,权利人不变', tWd.status === 'WITHDRAWN' && tWd.withdrawnBy === 'FIN-CMB' && pWd.financerId === 'FIN-ICBC');
+  await expectFail('撤回后再确认被拒', 'TRANSFER_NOT_PENDING', () =>
+    call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-CMB', transferId: T1 }));
+  await expectFail('非参与方撤回被拒', 'FORBIDDEN', () =>
+    call('/api/pledges/transfer-withdraw', { actorId: 'WH-1', transferId: T1 }));
+
+  // 有生效放行单时申请被拒(先部分放行,再申请)
+  const rl = await call('/api/pledges/release', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, qty: 100, sessionId: SES_T });
+  await expectFail('存在未核销放行单时申请被拒 ACTIVE_RELEASE_EXISTS', 'ACTIVE_RELEASE_EXISTS', () =>
+    call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, newFinancerId: 'FIN-CMB' }));
+  // 核销放行单(出库100吨)后申请可成立
+  await call('/api/receipts/deliver', { actorId: 'WH-1', receiptId: 'WR0001', qty: 100, releaseToken: rl.release.token });
+  const apply2 = await call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P_T, newFinancerId: 'FIN-CMB', expectedVersion: 1, sessionId: SES_T });
+  const T2 = apply2.transfer.id;
+
+  // 清偿闸门:全额还款后,双方确认的生效一刻必须被拒(先制造双方确认)。
+  // 为验证「生效时」闸门而非申请时,直接构造:申请在还款前成立,再还款,再由两方确认。
+  await call('/api/pledges/repay', { pledgeId: P_T, actorId: 'ENT-HONGTAI', amount: 40000000, sessionId: SES_T });
+  await call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-ICBC', transferId: T2, sessionId: SES_T });
+  await expectFail('已清偿后最后一方确认不切换(PLEDGE_SETTLED)', 'PLEDGE_SETTLED', () =>
+    call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-CMB', transferId: T2 }));
+  const stGate = await state();
+  const tGate = stGate.transfers.find((x) => x.id === T2);
+  const pGate = stGate.pledges.find((x) => x.id === P_T);
+  ok('清偿闸门触发后:确认事务回滚(CMB 确认位未被置位),质押仍属 ICBC',
+    tGate.confirmedBy['FIN-CMB'] === false && tGate.status === 'PENDING' && pGate.financerId === 'FIN-ICBC' && pGate.version === 1);
+
+  // 撤回该申请,重新走一遍正常交接(撤销还款影响:用一笔新的未清偿质押更简单)
+  await call('/api/pledges/transfer-withdraw', { actorId: 'FIN-ICBC', transferId: T2 });
+  const lk3 = await call('/api/pledges/lock', { reqId: rid(), actorId: 'FIN-ICBC', financerId: 'FIN-ICBC', receiptId: 'WR0002', valuationBatchId: vbT, loanAmount: 30000000, sessionId: SES_T });
+  const P3 = lk3.pledge.id;
+  const reg3 = await call('/api/pledges/register', { actorId: 'FIN-ICBC', pledgeId: P3, registrationNo: regNo(), expectedVersion: 1, sessionId: SES_T });
+  const reg3Snapshot = { ...(await state()).pledges.find((x) => x.id === P3).registration };
+  const t3 = (await call('/api/pledges/transfer-apply', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P3, newFinancerId: 'FIN-CMB', expectedVersion: 1, sessionId: SES_T })).transfer.id;
+  await call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-ICBC', transferId: t3, sessionId: SES_T });
+  const eff = await call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-CMB', transferId: t3, expectedVersion: 1, sessionId: SES_T });
+  ok('双方确认齐备 → 生效,权利人切换且质押版本 +1', eff.effective === true && eff.pledgeAfter.financerId === 'FIN-CMB' && eff.pledgeAfter.version === 2);
+  await expectFail('生效后再确认被拒', 'TRANSFER_ALREADY_EFFECTIVE', () =>
+    call('/api/pledges/transfer-confirm', { reqId: rid(), actorId: 'FIN-CMB', transferId: t3 }));
+  // 旧质权人三类处分
+  await expectFail('交接后旧质权人登记被拒 FORBIDDEN', 'FORBIDDEN', () =>
+    call('/api/pledges/register', { actorId: 'FIN-ICBC', pledgeId: P3, registrationNo: regNo(), expectedVersion: 2 }));
+  await expectFail('交接后旧质权人还款被拒 FORBIDDEN', 'FORBIDDEN', () =>
+    call('/api/pledges/repay', { pledgeId: P3, actorId: 'FIN-ICBC', amount: 1 }));
+  await expectFail('交接后旧质权人放行被拒 FORBIDDEN', 'FORBIDDEN', () =>
+    call('/api/pledges/release', { reqId: rid(), actorId: 'FIN-ICBC', pledgeId: P3, qty: 10 }));
+  // 新质权人可继续处理原质押
+  const relNew = await call('/api/pledges/release', { reqId: rid(), actorId: 'FIN-CMB', pledgeId: P3, qty: 100, sessionId: SES_T });
+  ok('新质权人可继续放行原质押', !!relNew.release.token && relNew.release.financerId === 'FIN-CMB');
+  const p3Now = (await state()).pledges.find((x) => x.id === P3);
+  ok('原登记凭证完整保留(回执号/时刻/仓单版本不变)',
+    p3Now.registration.registrationNo === reg3Snapshot.registrationNo &&
+    p3Now.registration.registeredAt === reg3Snapshot.registeredAt &&
+    p3Now.registration.receiptVersion === reg3Snapshot.receiptVersion &&
+    p3Now.registration.receiptVersion === 1);
+  // 第一张质押的回执从未被改写
+  const pTNow = (await state()).pledges.find((x) => x.id === P_T);
+  ok('被撤回/闸门拦截的质押,其首次登记凭证原样保留',
+    pTNow.registration.registrationNo === firstReg.registrationNo &&
+    pTNow.registration.registeredAt === firstReg.registeredAt &&
+    pTNow.financerId === 'FIN-ICBC');
+  // 审计与链
+  const auT = await get('/api/audit');
+  ok('交接审计无异常,且存在已生效/已撤回计数',
+    auT.handoffIssues.length === 0 &&
+    auT.counts.transfersEffective >= 1 && auT.counts.transfersWithdrawn >= 2 &&
+    auT.counts.transfersPending === 0);
+  ok('转让全流程后权利链验签通过、无一单多质', auT.chain.ok && auT.doubleFinancing.length === 0);
+  // 会话重建含转让进度
+  const sessT = await get('/api/session?sessionId=' + SES_T);
+  ok('会话台账重建出全部转让单(3 笔:已撤回×2 + 已生效×1)',
+    sessT.ledger.transfers.length === 3 &&
+    sessT.ledger.transfers.filter((t) => t.status === 'WITHDRAWN').length === 2 &&
+    sessT.ledger.transfers.filter((t) => t.status === 'EFFECTIVE').length === 1);
+  ok('会话步骤含 申请/确认/撤回/生效 四类',
+    sessT.steps.some((s) => s.action === 'transfer-apply') &&
+    sessT.steps.some((s) => s.action === 'transfer-confirm') &&
+    sessT.steps.some((s) => s.action === 'transfer-withdraw') &&
+    sessT.steps.some((s) => s.action === 'transfer-effective'));
+  // 按转让单查询留痕
+  const opsT = await get('/api/operations?transferId=' + t3);
+  ok('可按转让单回放其全部留痕(申请→两确认→生效,顺序严格)',
+    opsT.map((o) => o.action).join(',') === 'transfer-apply,transfer-confirm,transfer-confirm,transfer-effective' &&
+    opsT.every((o, i) => !i || opsT[i - 1].seq < o.seq));
+
   console.log(`\n================ 结果:${passed} 通过,${fails.length} 失败 ================`);
   if (fails.length) { console.log('失败项:', fails); process.exit(1); }
 }

@@ -22,7 +22,10 @@ const REQ_FIELDS = {
   cancel: ['pledgeId', 'actorId'],
   supplement: ['pledgeId', 'amount', 'actorId'],
   repay: ['pledgeId', 'amount', 'actorId'],
-  release: ['reqId', 'pledgeId', 'qty']
+  release: ['reqId', 'pledgeId', 'qty'],
+  'transfer-apply': ['reqId', 'pledgeId', 'newFinancerId', 'expectedVersion'],
+  'transfer-confirm': ['reqId', 'transferId', 'expectedVersion'],
+  'transfer-withdraw': ['transferId']
 };
 
 function guard(action, fn) {
@@ -34,6 +37,10 @@ function guard(action, fn) {
         const input = body || {};
         let receiptId = input.receiptId || null;
         let pledgeId = input.pledgeId || null;
+        if ((!receiptId || !pledgeId) && input.transferId) {
+          const t = getState().transfers.find((x) => x.id === input.transferId);
+          if (t) { receiptId = receiptId || t.receiptId; pledgeId = pledgeId || t.pledgeId; }
+        }
         if (!receiptId && pledgeId) {
           const p = getState().pledges.find((x) => x.id === pledgeId);
           if (p) receiptId = p.receiptId;
@@ -109,6 +116,7 @@ const routes = {
     domain.queryOperations({
       receiptId: query.get('receiptId') || undefined,
       pledgeId: query.get('pledgeId') || undefined,
+      transferId: query.get('transferId') || undefined,
       actorId: query.get('actorId') || undefined,
       sessionId: query.get('sessionId') || undefined,
       action: query.get('action') || undefined,
@@ -131,6 +139,9 @@ const routes = {
   'POST /api/pledges/supplement': guard('supplement', (b) => domain.supplementCollateral(b)),
   'POST /api/pledges/repay': guard('repay', (b) => domain.repayPledge(b)),
   'POST /api/pledges/release': guard('release', (b) => domain.releasePledge(b)),
+  'POST /api/pledges/transfer-apply': guard('transfer-apply', (b) => domain.applyTransfer(b)),
+  'POST /api/pledges/transfer-confirm': guard('transfer-confirm', (b) => domain.confirmTransfer(b)),
+  'POST /api/pledges/transfer-withdraw': guard('transfer-withdraw', (b) => domain.withdrawTransfer(b)),
   'POST /api/admin/reset': async () => {
     seed();
     return { ok: true, message: '已重置为演示数据' };

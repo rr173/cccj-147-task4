@@ -235,12 +235,13 @@ export function createBrowser(baseUrl) {
   document.body = makeElement(document, 'body');
   // HTML 骨架中静态存在的元素(tag 用于 querySelector('tbody'))
   const TABLES = ['tbl-receipts', 'tbl-ib', 'tbl-dl', 'tbl-rl', 'tbl-steps', 'tbl-pledges',
-    'tbl-sup', 'tbl-batch', 'tbl-ops', 'tbl', 'tbl-events'];
+    'tbl-sup', 'tbl-batch', 'tbl-ops', 'tbl', 'tbl-events', 'tbl-transfers'];
   const SELECTS = ['f-loc', 'f-grade', 'f-holder', 'p-fin', 'p-receipt', 'p-batch',
-    'race-receipt', 'stale-pledge', 'replay-pledge', 'op-outcome', 'op-action'];
-  const INPUTS = ['f-qty', 'f-start', 'p-amount', 'vb-note', 'filter',
+    'race-receipt', 'stale-pledge', 'replay-pledge', 'transfer-pledge',
+    't-actor', 't-pledge', 't-assignee', 'op-outcome', 'op-action'];
+  const INPUTS = ['f-qty', 'f-start', 'p-amount', 'vb-note', 'filter', 't-version',
     'op-receipt', 'op-pledge', 'op-actor', 'op-session'];
-  const BUTTONS = ['btn-register', 'btn-merge', 'btn-merge-clear', 'btn-refresh', 'btn-reset', 'btn-lock'];
+  const BUTTONS = ['btn-register', 'btn-merge', 'btn-merge-clear', 'btn-refresh', 'btn-reset', 'btn-lock', 'btn-transfer-apply'];
   const tagFor = (id) =>
     TABLES.includes(id) ? 'table' : SELECTS.includes(id) ? 'select' :
     INPUTS.includes(id) ? 'input' : BUTTONS.includes(id) ? 'button' : 'div';

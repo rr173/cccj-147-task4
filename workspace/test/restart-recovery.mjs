@@ -161,6 +161,79 @@ async function main() {
     tl.operations.some((o) => o.ref && o.ref.registrationNo === regNo) &&
     tl.operations.some((o) => o.ref && o.ref.token === expected.token));
 
+  console.log('\n=== 质权转让:宕机前发起+单方确认,重启后恢复同一进度并继续交接 ===');
+  // WR0002 上有一笔 FIN-CMB 的 LOCKED 质押(陈旧登记被拒),先正常登记再发起转让
+  const vbPl2 = (await get('/api/state')).pledges.find((p) => p.receiptId === 'WR0002');
+  const transferRegNo = 'REG-PERSIST-TRANSFER-0001';
+  await call('/api/pledges/register', { actorId: 'FIN-CMB', pledgeId: vbPl2.id, registrationNo: transferRegNo, expectedVersion: 2, sessionId: SESSION });
+  const applyReq = 'TA-PERSIST-0001';
+  const confirmReqCmb = 'TC-PERSIST-CMB';
+  const applied = await call('/api/pledges/transfer-apply', {
+    reqId: applyReq, actorId: 'FIN-CMB', pledgeId: vbPl2.id,
+    newFinancerId: 'FIN-ICBC', expectedVersion: 1, sessionId: SESSION
+  });
+  const transferId = applied.transfer.id;
+  // 原质权人 CMB 先确认;受让机构 ICBC 宕机前尚未确认 —— 进度停在「单方已确认」
+  await call('/api/pledges/transfer-confirm', { reqId: confirmReqCmb, actorId: 'FIN-CMB', transferId, sessionId: SESSION });
+  const regBeforeRestart = (await get('/api/state')).pledges.find((p) => p.id === vbPl2.id).registration;
+  const beforeTransfer = (await get('/api/state')).transfers.find((t) => t.id === transferId);
+  ok('宕机前转让单为 PENDING 且仅 CMB 已确认',
+    beforeTransfer.status === 'PENDING' &&
+    beforeTransfer.confirmedBy['FIN-CMB'] === true &&
+    beforeTransfer.confirmedBy['FIN-ICBC'] === false);
+  const headBeforeTransfer = (await get('/api/audit')).chain.head;
+
+  console.log('\n=== SIGKILL(第二次,交接进行中)===');
+  srv.kill('SIGKILL');
+  await new Promise((r) => srv.on('exit', r));
+  await waitReady(false);
+  srv = startServer();
+  if (!(await waitReady(true))) throw new Error('服务重启超时');
+
+  const afterTransfer = (await get('/api/state')).transfers.find((t) => t.id === transferId);
+  ok('转让进度随盘恢复:同单号 PENDING、确认位一致、申请版本一致',
+    afterTransfer.status === 'PENDING' &&
+    afterTransfer.confirmedBy['FIN-CMB'] === true &&
+    afterTransfer.confirmedBy['FIN-ICBC'] === false &&
+    afterTransfer.pledgeVersion === 1 &&
+    afterTransfer.financerId === 'FIN-CMB' && afterTransfer.newFinancerId === 'FIN-ICBC');
+  const pledgeDuring = (await get('/api/state')).pledges.find((p) => p.id === vbPl2.id);
+  ok('宕机重启后权利人未被切换(仍是 CMB),质押版本仍 v1',
+    pledgeDuring.financerId === 'FIN-CMB' && pledgeDuring.version === 1);
+  ok('转让恢复后链头与宕机前一致', (await get('/api/audit')).chain.head === headBeforeTransfer);
+  // 幂等表随盘恢复
+  const applyReplayAfter = await call('/api/pledges/transfer-apply', {
+    reqId: applyReq, actorId: 'FIN-CMB', pledgeId: vbPl2.id, newFinancerId: 'FIN-ICBC', expectedVersion: 1, sessionId: SESSION
+  });
+  ok('相同转让申请 reqId 重启后重放:返回既有转让单,不生第二笔',
+    applyReplayAfter.replayed === true && applyReplayAfter.transfer.id === transferId);
+  const confirmReplayAfter = await call('/api/pledges/transfer-confirm', { reqId: confirmReqCmb, actorId: 'FIN-CMB', transferId, sessionId: SESSION });
+  ok('相同确认 reqId 重启后重放:返回既有状态,不重复生效',
+    confirmReplayAfter.replayed === true && confirmReplayAfter.transfer.status === 'PENDING');
+  ok('重启后转让单仍只有一笔(无双重申请)', (await get('/api/state')).transfers.filter((t) => t.pledgeId === vbPl2.id).length === 1);
+
+  // 受让机构重启后完成最后一次确认 → 生效
+  const effAfter = await call('/api/pledges/transfer-confirm', { reqId: 'TC-PERSIST-ICBC', actorId: 'FIN-ICBC', transferId, expectedVersion: 1, sessionId: SESSION });
+  ok('重启后补齐第二方确认即交接生效',
+    effAfter.effective === true && effAfter.pledgeAfter.financerId === 'FIN-ICBC' && effAfter.pledgeAfter.version === 2);
+  const pledgeAfter = (await get('/api/state')).pledges.find((p) => p.id === vbPl2.id);
+  ok('原登记凭证不被交接改写(回执号/登记时刻/登记仓单版本保留)',
+    pledgeAfter.registration.registrationNo === regBeforeRestart.registrationNo &&
+    pledgeAfter.registration.registeredAt === regBeforeRestart.registeredAt &&
+    pledgeAfter.registration.receiptVersion === regBeforeRestart.receiptVersion);
+  // 旧质权人重启后仍不能处分
+  try {
+    await call('/api/pledges/release', { reqId: rid('RLAFTER'), actorId: 'FIN-CMB', pledgeId: vbPl2.id, qty: 10, sessionId: SESSION });
+    ok('交接后旧质权人重启后放行仍被拒 FORBIDDEN', false);
+  } catch (e) {
+    ok('交接后旧质权人重启后放行仍被拒 FORBIDDEN', e.code === 'FORBIDDEN', e.code);
+  }
+  const tFinal = (await get('/api/state')).transfers.find((x) => x.id === transferId);
+  ok('转让单终态 EFFECTIVE 且双方确认齐备、权利人为受让方',
+    tFinal.status === 'EFFECTIVE' && tFinal.confirmedBy['FIN-CMB'] && tFinal.confirmedBy['FIN-ICBC']);
+  const auditAfter = await get('/api/audit');
+  ok('交接审计无异常、链验签通过', auditAfter.handoffIssues.length === 0 && auditAfter.chain.ok);
+
   srv.kill('SIGTERM');
   await new Promise((r) => srv.on('exit', r));
   rmSync(DB_FILE, { force: true });

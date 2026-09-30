@@ -12,10 +12,17 @@ const EVENT_CN = {
   PLEDGE_LOCKED: '质押锁定', PLEDGE_CANCELLED: '质押撤回', PLEDGE_REGISTERED: '质押登记',
   PLEDGE_REVALUED: '担保重估', SUPPLEMENT_REQUESTED: '补充担保要求', COLLATERAL_SUPPLEMENTED: '补充担保到账',
   LOAN_REPAID: '偿还融资', RELEASE_GRANTED: '质权人放行', PLEDGE_CLOSED: '担保结清归档',
+  PLEDGE_TRANSFER_REQUESTED: '质权转让申请', PLEDGE_TRANSFER_CONFIRMED: '质权转让确认',
+  PLEDGE_TRANSFER_EFFECTIVE: '质权交接生效', PLEDGE_TRANSFER_WITHDRAWN: '质权转让撤回',
   VALUATION_BATCH_CREATED: '估值批次发布', ATTEMPT_LOGGED: '操作留痕'
 };
 
-const ACTION_CN = { lock: '锁仓', register: '质押登记', cancel: '撤回锁定', supplement: '补充担保', repay: '还款', release: '质权人放行' };
+const ACTION_CN = {
+  lock: '锁仓', register: '质押登记', cancel: '撤回锁定', supplement: '补充担保', repay: '还款',
+  release: '质权人放行',
+  'transfer-apply': '发起质权转让', 'transfer-confirm': '确认质权转让',
+  'transfer-withdraw': '撤回质权转让', 'transfer-effective': '质权交接生效'
+};
 
 async function load() {
   STATE = await getState();
@@ -83,6 +90,12 @@ function opRefCell(o) {
     return `<b class="mono">${esc(r.registrationNo)}</b><div class="small muted">${esc(r.registrar || '登记中心')} · v${r.receiptVersion}</div>`;
   if (r.token)
     return `<b class="mono">${esc(r.token)}</b><div class="small muted">${esc(r.releaseId)} · ${fmtNum(r.qty)}吨 / 余 ${fmtNum(r.remaining)}吨</div>`;
+  if (r.transferId) {
+    const cb = Object.entries(r.confirmedBy || {}).map(([k, v]) => `${esc(k)}:${v ? '✔' : '○'}`).join(' · ');
+    return `<b class="mono">${esc(r.transferId)}</b> ${badge(r.status)}
+      <div class="small muted">${esc(r.fromFinancerId)} → ${esc(r.toFinancerId)}</div>
+      <div class="small muted">${cb}${r.effectiveAt ? ' · 生效 ' + fmtTime(r.effectiveAt) : ''}${r.withdrawnBy ? ' · ' + esc(r.withdrawnBy) + '撤回' : ''}</div>`;
+  }
   if (r.pledgeId) return `<span class="small mono">${esc(r.pledgeId)}</span>`;
   return '<span class="muted small">—</span>';
 }
@@ -133,6 +146,15 @@ function renderAudit() {
     (a.prematureClaims.length
       ? `<div class="tag-bad">发现 ${a.prematureClaims.length} 起</div>` + a.prematureClaims.map((x) => `<div class="small mono">${x.pledgeId} @ ${x.receiptId}</div>`).join('')
       : '<div class="tag-good">✔ 无提前宣称</div><div class="small muted">所有可对外主张的担保均已登记</div>');
+
+  // I8 质权交接完整性:生效单必须双方确认且权利人为受让方;在途单不得漂移;不得双重在途
+  const c4 = a.counts;
+  const handoff = document.getElementById('audit-handoff');
+  handoff.innerHTML = `<b>④ 质权转让交接(双方确认 / 无双重权利人)</b><div class="hr" style="margin:6px 0"></div>` +
+    (a.handoffIssues.length
+      ? `<div class="tag-bad">发现 ${a.handoffIssues.length} 项交接异常</div>` + a.handoffIssues.map((x) => `<div class="small mono">${esc(x.transferId || x.pledgeId)}:${esc(x.issue)}${x.count ? ' ×' + x.count : ''}</div>`).join('')
+      : `<div class="tag-good">✔ 交接一致:无双重权利人 / 无半交接</div>
+         <div class="small muted">待确认 ${c4.transfersPending} · 已撤回 ${c4.transfersWithdrawn} · 已生效 ${c4.transfersEffective}(共 ${c4.transfers} 笔)</div>`);
 }
 
 function renderReceipts() {
@@ -174,7 +196,7 @@ window.lineage = async (id) => {
   const res = await fetch('/api/receipt?id=' + id);
   const json = await res.json();
   if (!json.ok) return toast(json.error.message, 'error');
-  const { lineage, events, operations } = json.data;
+  const { lineage, events, operations, transfers } = json.data;
   const byDepth = {};
   lineage.nodes.forEach((n) => ((byDepth[n.depth] ||= []).push(n)));
   const cols = Object.keys(byDepth).sort((a, b) => b - a)
@@ -188,12 +210,22 @@ window.lineage = async (id) => {
       ${o.reasonCode ? `<div class="small"><b>${esc(o.reasonCode)}</b>:${esc(o.reason || '')}</div>` : ''}
       ${o.ref && o.ref.registrationNo ? `<div class="small tag-good">登记回执号:${esc(o.ref.registrationNo)} @ ${fmtTime(o.ref.registeredAt)}(仓单 v${o.ref.receiptVersion})</div>` : ''}
       ${o.ref && o.ref.token ? `<div class="small tag-good">放行令牌:${esc(o.ref.token)}(${esc(o.ref.releaseId)},${fmtNum(o.ref.qty)} 吨,余 ${fmtNum(o.ref.remaining)} 吨)</div>` : ''}
+      ${o.ref && o.ref.transferId ? `<div class="small"><b>转让单 ${esc(o.ref.transferId)}</b> ${badge(o.ref.status)} · ${esc(o.ref.fromFinancerId)} → ${esc(o.ref.toFinancerId)}<br><span class="muted">确认:${Object.entries(o.ref.confirmedBy || {}).map(([k, v]) => esc(k) + (v ? '✔' : '○')).join(' / ')}${o.ref.effectiveAt ? ' · 生效 ' + fmtTime(o.ref.effectiveAt) : ''}${o.ref.withdrawnBy ? ' · ' + esc(o.ref.withdrawnBy) + '撤回' : ''}</span></div>` : ''}
+    </li>`).join('');
+  const transferRows = (transfers || []).map((t) => `<li>
+      <div class="ev-type">${esc(t.id)} ${badge(t.status)}<span class="muted small"> 质押 ${esc(t.pledgeId)} v${t.pledgeVersion}</span></div>
+      <div class="ev-meta">申请 ${fmtTime(t.appliedAt)} · ${esc(t.appliedBy)} · ${esc(t.financerId)} → ${esc(t.newFinancerId)}</div>
+      ${(t.confirmations || []).map((c) => `<div class="small">${fmtTime(c.at)} · ${esc(c.party)} 确认(基于质押 v${c.pledgeVersion})</div>`).join('')}
+      ${t.status === 'WITHDRAWN' ? `<div class="small tag-bad">${fmtTime(t.withdrawnAt)} · ${esc(t.withdrawnBy)} 撤回,当前权利人不变</div>` : ''}
+      ${t.status === 'EFFECTIVE' ? `<div class="small tag-good">${fmtTime(t.effectiveAt)} · 交接生效,权利人切换为 ${esc(t.newFinancerId)},原登记凭证保留</div>` : ''}
     </li>`).join('');
   openModal(`
     <h2>权属穿透 · ${id}</h2>
     <div style="display:flex;gap:8px;align-items:stretch;overflow:auto">${cols}</div>
-    <h3>融资方操作回放(严格按发生顺序,含登记回执号与放行令牌)</h3>
+    <h3>融资方操作回放(严格按发生顺序,含登记回执号、放行令牌与转让/拒绝)</h3>
     <ul class="timeline">${opRows || '<li class="muted small">该仓单暂无融资方操作</li>'}</ul>
+    <h3>质权转让与交接回放(申请 → 双方确认 → 撤回 / 生效)</h3>
+    <ul class="timeline">${transferRows || '<li class="muted small">该仓单暂无质权转让</li>'}</ul>
     <h3>不可抵赖权利链事件</h3>
     <ul class="timeline">
       ${events.map((e) => `<li>
