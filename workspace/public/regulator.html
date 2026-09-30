@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>监管查询 · 电子仓单平台</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="topbar"></div>
+<main>
+  <div id="chain-banner"></div>
+
+  <div class="grid cols-3" id="stats"></div>
+
+  <div class="grid cols-2" style="margin-top:16px">
+    <div class="card">
+      <h2>🔗 权利链完整性验签</h2>
+      <div id="chain-box" class="small"></div>
+      <div class="hr"></div>
+      <div class="row-actions">
+        <button class="primary" onclick="verify()">重新验签</button>
+        <button onclick="showChainTail()">查看链尾</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>🛰 估值批次(价格快照)</h2>
+      <div class="table-wrap" style="max-height:260px">
+        <table id="tbl-batch"><thead><tr><th>批次</th><th>说明</th><th>品级价格(元/吨)</th><th>时间</th></tr></thead><tbody></tbody></table>
+      </div>
+      <h3>发布新估值批次(行情更新,不影响已锁定批次)</h3>
+      <div class="form-row">
+        <label class="fld">说明<input id="vb-note" placeholder="如 2026年10月第1周"></label>
+        <button class="primary" onclick="newBatch()">按当前品级基价发布快照</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🚨 合规审计</h2>
+    <div class="grid cols-3">
+      <div class="scenario" id="audit-overlap"></div>
+      <div class="scenario" id="audit-double"></div>
+      <div class="scenario" id="audit-claim"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🛰 融资方操作审计回放(成功 / 冲突 / 拒绝全程留痕)
+      <button style="margin-left:auto" onclick="loadOperations()">查询</button>
+    </h2>
+    <div class="form-row" style="margin-bottom:10px">
+      <label class="fld">仓单号<input id="op-receipt" placeholder="如 WR0001"></label>
+      <label class="fld">质押号<input id="op-pledge" placeholder="如 PL0001"></label>
+      <label class="fld">操作主体<input id="op-actor" placeholder="如 FIN-ICBC"></label>
+      <label class="fld">会话号<input id="op-session" placeholder="SES-…"></label>
+      <label class="fld">结果
+        <select id="op-outcome">
+          <option value="">全部</option>
+          <option value="SUCCESS">成功</option>
+          <option value="CONFLICT">冲突/重放</option>
+          <option value="REJECTED">拒绝</option>
+        </select>
+      </label>
+      <label class="fld">步骤
+        <select id="op-action">
+          <option value="">全部</option>
+          <option value="lock">锁仓</option>
+          <option value="register">质押登记</option>
+          <option value="cancel">撤回锁定</option>
+          <option value="supplement">补充担保</option>
+          <option value="repay">还款</option>
+          <option value="release">质权人放行</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-wrap" style="max-height:380px">
+      <table id="tbl-ops"><thead><tr>
+        <th>顺序#</th><th>时间</th><th>步骤</th><th>主体</th><th>仓单 / 质押</th>
+        <th>结果</th><th>原因码 / 实际原因</th><th>登记回执号 / 放行令牌</th><th>会话号 / 幂等键</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🗂 全量仓单与权属穿透
+      <input id="filter" placeholder="搜索仓单号/货主/库位…" style="margin-left:auto;max-width:240px">
+      <button onclick="load()">刷新</button>
+    </h2>
+    <div class="table-wrap">
+      <table id="tbl">
+        <thead><tr>
+          <th>仓单号</th><th>库位</th><th>区间</th><th>品级</th><th>数量</th><th>版本</th>
+          <th>状态</th><th>货主</th><th>当前质权人 / 登记回执</th><th>权利链</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>📜 全局事件流(append-only,# 即链上序号)</h2>
+    <div class="table-wrap" style="max-height:420px">
+      <table id="tbl-events"><thead><tr><th>#</th><th>时间</th><th>事件</th><th>仓单</th><th>质押</th><th>主体</th><th>载荷摘要</th><th>哈希</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script src="/regulator.js"></script>
+</body>
+</html>

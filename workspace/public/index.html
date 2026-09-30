@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大宗商品电子仓单登记与质押协同平台</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="topbar"></div>
+<main>
+  <div class="banner">
+    平台围绕 <b>「实物区间不重叠 · 版本锁定 · 登记生效 · 复检不抹押 · 放行出库」</b> 五条铁律构建。
+    所有状态变更经串行事务落盘,并形成 SHA-256 哈希权利链,可供监管独立验签。
+  </div>
+  <div class="grid cols-3">
+    <div class="card">
+      <h2>🏬 仓库端</h2>
+      <p class="small muted">按库位与检验批登记仓单;仓单拆分 / 合并(区间相邻校验);复检品级数量下降;凭质权人放行办理出库。</p>
+      <div class="hr"></div>
+      <a class="btn primary" href="/warehouse.html" style="text-decoration:none">进入仓库工作台 →</a>
+    </div>
+    <div class="card">
+      <h2>🏦 融资方端</h2>
+      <p class="small muted">锁定仓单版本、估值批次与权利人;登记成功前仅显示「未生效」;补充担保、还款与放行;含并发质押 / 回执重放 / 旧版晚到演练。</p>
+      <div class="hr"></div>
+      <a class="btn primary" href="/financier.html" style="text-decoration:none">进入融资工作台 →</a>
+    </div>
+    <div class="card">
+      <h2>🛡 监管查询</h2>
+      <p class="small muted">区间重叠审计、重复融资扫描、未登记宣称检测、权利链验签;逐单查看派生谱系与完整时间线。</p>
+      <div class="hr"></div>
+      <a class="btn primary" href="/regulator.html" style="text-decoration:none">进入监管看板 →</a>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🔒 关键业务规则(系统强制,非页面提示)</h2>
+    <table>
+      <thead><tr><th style="width:200px">规则</th><th>实现方式</th></tr></thead>
+      <tbody>
+        <tr><td>实物数量区间不重叠</td><td class="small">同一库位内有效仓单的 <span class="interval">[startQty,endQty)</span> 区间两两相交检测;登记 / 拆分 / 合并 / 复检 / 出库每个事务提交前强制执行。</td></tr>
+        <tr><td>三锁定 + 登记生效</td><td class="small">质押锁定仓单 <b>version</b>、估值批次 <b>valuationBatchId</b>、权利人 <b>financerId</b>;登记回执到达前状态恒为「已锁定·未登记」,禁止宣称担保生效。</td></tr>
+        <tr><td>复检只重估受影响单</td><td class="small">复检生成新检验批并版本 +1,仅重算该仓单项下质押的担保值;不足转 <b>SUPPLEMENTING</b> 并生成补充担保要求,原质押不删除。</td></tr>
+        <tr><td>放行前置出库</td><td class="small">存在有效质押时,出库必须携带<b>当前质权人</b>签发的放行令牌;未还款只允许按放行数量部分出库。</td></tr>
+        <tr><td>并发 / 晚到 / 重放 / 故障</td><td class="small">写操作 FIFO 串行 + 写时复制事务(拆分崩溃整体回滚);排他质押拦截第二家;旧版本登记拒绝;登记回执 / 放行请求幂等去重。</td></tr>
+        <tr><td>可核验权利链</td><td class="small">append-only 事件日志,每条含 <span class="mono">prevHash</span>,SHA-256 链式验签,监管页一键校验并展示仓单派生谱系。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+document.getElementById('topbar').innerHTML = EWR.renderTopbar('');
+</script>
+</body>
+</html>

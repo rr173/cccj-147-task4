@@ -1,0 +1,17 @@
+{
+  "name": "ewr-platform",
+  "version": "1.0.0",
+  "description": "大宗商品电子仓单登记与质押协同平台",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node test/smoke.mjs",
+    "test:restart": "node test/restart-recovery.mjs",
+    "test:e2e": "node test/e2e-flow.mjs",
+    "test:all": "node test/smoke.mjs && node test/restart-recovery.mjs && node test/e2e-flow.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

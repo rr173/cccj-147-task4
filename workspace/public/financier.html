@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>融资方端 · 电子仓单平台</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="topbar"></div>
+<main>
+  <div class="banner warn" id="claim-banner">
+    ⚠ 合规红线:质押<b>登记成功之前</b>仅为内部锁定,任何系统页面/接口均不得对外宣称担保物权已生效。
+    下方质押台账中,只有 <span class="badge green">已登记·担保生效</span> 状态可对外主张担保权利。
+  </div>
+
+  <div class="card" id="session-card">
+    <h2>♻ 可恢复操作会话(刷新 / 接口重复提交 / 服务重启后从服务端重建)
+      <span style="margin-left:auto" class="row-actions">
+        <button class="ghost" onclick="copySessionId()">复制会话号</button>
+        <button onclick="newSession()">新建会话</button>
+        <button class="primary" onclick="reconcileSession()">从服务端重建会话</button>
+      </span>
+    </h2>
+    <div id="session-box" class="small"></div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>🪜 本会话操作步骤(成功 / 冲突 / 拒绝原因,含原始回执)
+      <span style="margin-left:auto" class="row-actions" id="step-filters">
+        <button class="ghost" data-f="all">全部</button>
+        <button class="ghost" data-f="SUCCESS">成功</button>
+        <button class="ghost" data-f="CONFLICT">冲突</button>
+        <button class="ghost" data-f="REJECTED">拒绝</button>
+        <button class="ghost" data-f="PENDING">待确认</button>
+      </span>
+    </h2>
+    <div class="table-wrap" style="max-height:340px">
+      <table id="tbl-steps"><thead><tr>
+        <th>#</th><th>时间</th><th>步骤</th><th>主体</th><th>仓单/质押</th><th>结果</th>
+        <th>实际原因 / 原始回执</th><th>幂等键</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+    <p class="small muted" style="margin:8px 0 0">
+      待确认 = 浏览器已提交但未收到响应的请求(崩溃/断网/刷新);重建时凭同一幂等键核对服务端结果,绝不重复下单。</p>
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h2>🔐 发起质押(锁定仓单版本 + 估值批次 + 权利人)</h2>
+      <div class="form-row">
+        <label class="fld">金融机构(质权人)
+          <select id="p-fin"></select>
+        </label>
+        <label class="fld">目标仓单
+          <select id="p-receipt"></select>
+        </label>
+        <label class="fld">估值批次
+          <select id="p-batch"></select>
+        </label>
+        <label class="fld">融资金额(元)
+          <input id="p-amount" type="number" placeholder="≤ 估值 × 70%">
+        </label>
+        <button class="primary" id="btn-lock">锁定质押</button>
+      </div>
+      <p class="small muted" style="margin-top:8px">锁定后仓单进入排他占有,其他机构并发质押将被拒;锁定不代表担保生效,须完成登记。</p>
+    </div>
+
+    <div class="card">
+      <h2>🧪 对抗演练(验证防重复融资)</h2>
+      <div class="grid" style="gap:10px">
+        <div class="scenario">
+          <b>① 多家机构并发质押同一仓单</b>
+          <p>对同一仓单几乎同时提交两笔锁定请求,验证仅一家成功(写操作串行 + 排他占有)。</p>
+          <div class="row-actions">
+            <select id="race-receipt"></select>
+            <button class="danger" onclick="scenarioRace()">两家机构并发质押</button>
+          </div>
+        </div>
+        <div class="scenario">
+          <b>② 旧版仓单晚到登记</b>
+          <p>先质押并复检推进仓单版本,再用<b>旧版本号</b>提交登记,系统拒绝陈旧登记请求。</p>
+          <div class="row-actions">
+            <select id="stale-pledge"></select>
+            <button class="danger" onclick="scenarioStale()">用旧版本号登记</button>
+          </div>
+        </div>
+        <div class="scenario">
+          <b>③ 相同登记回执重放</b>
+          <p>对同一登记回执号连续提交两次,第二次识别为重放,返回原回执且不产生第二笔担保。</p>
+          <div class="row-actions">
+            <select id="replay-pledge"></select>
+            <button class="danger" onclick="scenarioReplay()">登记 → 同回执再放一次</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>📒 质押台账 <button style="margin-left:auto" id="btn-refresh">刷新</button></h2>
+    <div class="table-wrap">
+      <table id="tbl-pledges">
+        <thead><tr>
+          <th>质押号</th><th>仓单/版本</th><th>质权人</th><th>出质人</th>
+          <th>融资额</th><th>锁定估值批次</th><th>当前担保值</th><th>敞口</th>
+          <th>状态</th><th style="min-width:330px">操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:16px">
+    <div class="card">
+      <h2>📣 补充担保要求(复检触发)</h2>
+      <div class="table-wrap" style="max-height:280px">
+        <table id="tbl-sup"><thead><tr><th>编号</th><th>质押</th><th>敞口</th><th>担保值</th><th>缺口</th><th>状态</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>🎫 已签发放行单</h2>
+      <div class="table-wrap" style="max-height:280px">
+        <table id="tbl-rl"><thead><tr><th>放行单</th><th>仓单</th><th>数量</th><th>令牌(交仓库出库)</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script src="/financier.js"></script>
+</body>
+</html>

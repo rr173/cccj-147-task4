@@ -1,0 +1,1141 @@
+{
+  "seq": {
+    "receipt": 3,
+    "event": 22,
+    "batch": 4,
+    "pledge": 3,
+    "valuation": 1,
+    "release": 1,
+    "delivery": 0,
+    "operation": 14
+  },
+  "commodities": [
+    {
+      "id": "CU",
+      "name": "阴极铜",
+      "unit": "吨"
+    },
+    {
+      "id": "AL",
+      "name": "电解铝",
+      "unit": "吨"
+    }
+  ],
+  "grades": [
+    {
+      "id": "CU-A",
+      "commodityId": "CU",
+      "name": "A级铜(99.95%)",
+      "basePrice": 72000
+    },
+    {
+      "id": "CU-B",
+      "commodityId": "CU",
+      "name": "B级铜(99.90%)",
+      "basePrice": 69000
+    },
+    {
+      "id": "AL-A",
+      "commodityId": "AL",
+      "name": "A级铝锭(99.70%)",
+      "basePrice": 19800
+    },
+    {
+      "id": "AL-B",
+      "commodityId": "AL",
+      "name": "B级铝锭(99.50%)",
+      "basePrice": 18600
+    }
+  ],
+  "locations": [
+    {
+      "id": "LOC-A1",
+      "warehouseId": "WH-1",
+      "name": "A区1号铜仓位",
+      "capacity": 5000,
+      "commodityId": "CU"
+    },
+    {
+      "id": "LOC-A2",
+      "warehouseId": "WH-1",
+      "name": "A区2号铜仓位",
+      "capacity": 5000,
+      "commodityId": "CU"
+    },
+    {
+      "id": "LOC-B1",
+      "warehouseId": "WH-1",
+      "name": "B区1号铝仓位",
+      "capacity": 8000,
+      "commodityId": "AL"
+    }
+  ],
+  "parties": [
+    {
+      "id": "WH-1",
+      "type": "warehouse",
+      "name": "华东保税仓储有限公司"
+    },
+    {
+      "id": "FIN-ICBC",
+      "type": "financer",
+      "name": "鼎信银行供应链金融部"
+    },
+    {
+      "id": "FIN-CMB",
+      "type": "financer",
+      "name": "远航银行动产融资中心"
+    },
+    {
+      "id": "ENT-HONGTAI",
+      "type": "enterprise",
+      "name": "宏泰铜业有限公司"
+    },
+    {
+      "id": "ENT-LVYE",
+      "type": "enterprise",
+      "name": "绿野铝业有限公司"
+    },
+    {
+      "id": "REG-1",
+      "type": "regulator",
+      "name": "地方金融监督管理局"
+    }
+  ],
+  "receipts": [
+    {
+      "id": "WR0001",
+      "warehouseId": "WH-1",
+      "locationId": "LOC-A1",
+      "commodityId": "CU",
+      "gradeId": "CU-A",
+      "holderId": "ENT-HONGTAI",
+      "inspectionBatchId": "IB0001",
+      "startQty": 0,
+      "endQty": 1000,
+      "version": 1,
+      "status": "ACTIVE",
+      "parentIds": [],
+      "createdAt": 1790528257427,
+      "deliveredQty": 0
+    },
+    {
+      "id": "WR0002",
+      "warehouseId": "WH-1",
+      "locationId": "LOC-A2",
+      "commodityId": "CU",
+      "gradeId": "CU-A",
+      "holderId": "ENT-HONGTAI",
+      "inspectionBatchId": "IB0002",
+      "startQty": 0,
+      "endQty": 480,
+      "version": 2,
+      "status": "ACTIVE",
+      "parentIds": [],
+      "createdAt": 1790528257427,
+      "deliveredQty": 0
+    },
+    {
+      "id": "WR0003",
+      "warehouseId": "WH-1",
+      "locationId": "LOC-B1",
+      "commodityId": "AL",
+      "gradeId": "AL-A",
+      "holderId": "ENT-LVYE",
+      "inspectionBatchId": "IB0003",
+      "startQty": 0,
+      "endQty": 2000,
+      "version": 1,
+      "status": "ACTIVE",
+      "parentIds": [],
+      "createdAt": 1790528257427,
+      "deliveredQty": 0
+    }
+  ],
+  "pledges": [
+    {
+      "id": "PL0001",
+      "receiptId": "WR0001",
+      "receiptVersion": 1,
+      "valuationBatchId": "VB0001",
+      "financerId": "FIN-ICBC",
+      "pledgorId": "ENT-HONGTAI",
+      "loanAmount": 40000000,
+      "ltvCap": 50750000,
+      "lockedValue": 72500000,
+      "currentValue": 72500000,
+      "latestValue": 72500000,
+      "coveredAmount": 40000000,
+      "currency": "CNY",
+      "status": "REGISTERED",
+      "publicClaimAllowed": true,
+      "registration": {
+        "registrationNo": "REG1790787457433f5ms",
+        "registeredAt": 1790787457434,
+        "registrar": "登记中心",
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001"
+      },
+      "createdAt": 1790787457430,
+      "revaluationCount": 0
+    },
+    {
+      "id": "PL0002",
+      "receiptId": "WR0002",
+      "receiptVersion": 1,
+      "valuationBatchId": "VB0001",
+      "financerId": "FIN-CMB",
+      "pledgorId": "ENT-HONGTAI",
+      "loanAmount": 10000000,
+      "ltvCap": 30450000,
+      "lockedValue": 43500000,
+      "currentValue": 34800000,
+      "latestValue": 34800000,
+      "coveredAmount": 0,
+      "currency": "CNY",
+      "status": "LOCKED",
+      "publicClaimAllowed": false,
+      "registration": null,
+      "createdAt": 1790787457457,
+      "revaluationCount": 1
+    },
+    {
+      "id": "PL0003",
+      "receiptId": "WR0003",
+      "receiptVersion": 1,
+      "valuationBatchId": "VB0001",
+      "financerId": "FIN-ICBC",
+      "pledgorId": "ENT-LVYE",
+      "loanAmount": 10000000,
+      "ltvCap": 27860000,
+      "lockedValue": 39800000,
+      "currentValue": 39800000,
+      "latestValue": 39800000,
+      "coveredAmount": 0,
+      "currency": "CNY",
+      "status": "LOCKED",
+      "publicClaimAllowed": false,
+      "registration": null,
+      "createdAt": 1790787457471,
+      "revaluationCount": 0
+    }
+  ],
+  "valuationBatches": [
+    {
+      "id": "VB0001",
+      "note": "2026年9月第4周市场价格",
+      "prices": {
+        "CU-A": 72500,
+        "CU-B": 69500,
+        "AL-A": 19900,
+        "AL-B": 18700
+      },
+      "createdAt": 1790614657427,
+      "createdBy": "REG-1"
+    }
+  ],
+  "inspectionBatches": [
+    {
+      "id": "IB0001",
+      "receiptId": "WR0001",
+      "locationId": "LOC-A1",
+      "gradeId": "CU-A",
+      "qty": 1000,
+      "inspectedAt": 1790528257427,
+      "kind": "INITIAL"
+    },
+    {
+      "id": "IB0002",
+      "receiptId": "WR0002",
+      "locationId": "LOC-A2",
+      "gradeId": "CU-A",
+      "qty": 600,
+      "inspectedAt": 1790528257427,
+      "kind": "INITIAL"
+    },
+    {
+      "id": "IB0003",
+      "receiptId": "WR0003",
+      "locationId": "LOC-B1",
+      "gradeId": "AL-A",
+      "qty": 2000,
+      "inspectedAt": 1790528257427,
+      "kind": "INITIAL"
+    },
+    {
+      "id": "IB0004",
+      "receiptId": "WR0002",
+      "locationId": "LOC-A2",
+      "gradeId": "CU-A",
+      "qty": 480,
+      "inspectedAt": 1790787457459,
+      "kind": "RECHECK"
+    }
+  ],
+  "releases": [
+    {
+      "id": "RL0001",
+      "pledgeId": "PL0001",
+      "receiptId": "WR0001",
+      "financerId": "FIN-ICBC",
+      "qty": 1000,
+      "remaining": 0,
+      "token": "TKN-RL0001-ZSPLJ945",
+      "consumed": false,
+      "createdAt": 1790787457448
+    }
+  ],
+  "deliveries": [],
+  "supplements": [],
+  "operationRecords": [
+    {
+      "id": "OP0001",
+      "seq": 1,
+      "at": 1790787457431,
+      "action": "lock",
+      "actionLabel": "锁仓",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "pledge-lock:REQ-ez4n1vdd",
+      "outcome": "SUCCESS",
+      "reasonCode": null,
+      "reason": null,
+      "request": {
+        "reqId": "REQ-ez4n1vdd",
+        "receiptId": "WR0001",
+        "financerId": "FIN-ICBC",
+        "valuationBatchId": "VB0001",
+        "loanAmount": 40000000
+      },
+      "ref": {
+        "pledgeId": "PL0001",
+        "receiptId": "WR0001",
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "status": "LOCKED"
+      },
+      "eventSeq": 2
+    },
+    {
+      "id": "OP0002",
+      "seq": 2,
+      "at": 1790787457434,
+      "action": "register",
+      "actionLabel": "质押登记",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "register:REG1790787457433f5ms",
+      "outcome": "SUCCESS",
+      "reasonCode": null,
+      "reason": null,
+      "request": {
+        "pledgeId": "PL0001",
+        "registrationNo": "REG1790787457433f5ms",
+        "expectedVersion": 1
+      },
+      "ref": {
+        "pledgeId": "PL0001",
+        "registrationNo": "REG1790787457433f5ms",
+        "registeredAt": 1790787457434,
+        "registrar": "登记中心",
+        "receiptVersion": 1
+      },
+      "eventSeq": 4
+    },
+    {
+      "id": "OP0003",
+      "seq": 3,
+      "at": 1790787457440,
+      "action": "lock",
+      "actionLabel": "锁仓",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "pledge-lock:REQ-ez4n1vdd",
+      "outcome": "CONFLICT",
+      "reasonCode": "IDEMPOTENT_REPLAY",
+      "reason": "相同锁仓请求重放:返回既有质押 PL0001,不产生第二笔质押",
+      "request": {
+        "reqId": "REQ-ez4n1vdd",
+        "receiptId": "WR0001",
+        "financerId": "FIN-ICBC",
+        "valuationBatchId": "VB0001",
+        "loanAmount": 40000000
+      },
+      "ref": {
+        "pledgeId": "PL0001",
+        "receiptId": "WR0001",
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "status": "REGISTERED"
+      },
+      "eventSeq": 5
+    },
+    {
+      "id": "OP0004",
+      "seq": 4,
+      "at": 1790787457442,
+      "action": "register",
+      "actionLabel": "质押登记",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "register:REG1790787457433f5ms",
+      "outcome": "CONFLICT",
+      "reasonCode": "IDEMPOTENT_REPLAY",
+      "reason": "相同登记回执重放:返回首次登记结果 REG1790787457433f5ms,第一次登记结果不变,不产生第二笔质押",
+      "request": {
+        "pledgeId": "PL0001",
+        "registrationNo": "REG1790787457433f5ms",
+        "expectedVersion": 1
+      },
+      "ref": {
+        "pledgeId": "PL0001",
+        "registrationNo": "REG1790787457433f5ms",
+        "registeredAt": 1790787457434,
+        "registrar": "登记中心",
+        "receiptVersion": 1
+      },
+      "eventSeq": 6
+    },
+    {
+      "id": "OP0005",
+      "seq": 5,
+      "at": 1790787457446,
+      "action": "repay",
+      "actionLabel": "还款",
+      "actorId": "ENT-HONGTAI",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": null,
+      "outcome": "SUCCESS",
+      "reasonCode": null,
+      "reason": null,
+      "request": {
+        "pledgeId": "PL0001",
+        "amount": 40000000,
+        "actorId": "ENT-HONGTAI"
+      },
+      "ref": {
+        "pledgeId": "PL0001",
+        "status": "REGISTERED",
+        "exposure": 0
+      },
+      "eventSeq": 8
+    },
+    {
+      "id": "OP0006",
+      "seq": 6,
+      "at": 1790787457448,
+      "action": "release",
+      "actionLabel": "质权人放行",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "release:REL-DUP-wuqo",
+      "outcome": "SUCCESS",
+      "reasonCode": null,
+      "reason": null,
+      "request": {
+        "reqId": "REL-DUP-wuqo",
+        "pledgeId": "PL0001"
+      },
+      "ref": {
+        "releaseId": "RL0001",
+        "token": "TKN-RL0001-ZSPLJ945",
+        "qty": 1000,
+        "remaining": 0,
+        "receiptId": "WR0001"
+      },
+      "eventSeq": 10
+    },
+    {
+      "id": "OP0007",
+      "seq": 7,
+      "at": 1790787457449,
+      "action": "release",
+      "actionLabel": "质权人放行",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "release:REL-DUP-wuqo",
+      "outcome": "CONFLICT",
+      "reasonCode": "IDEMPOTENT_REPLAY",
+      "reason": "相同放行请求重放:返回原放行令牌 TKN-RL0001-ZSPLJ945,令牌不重复签发",
+      "request": {
+        "reqId": "REL-DUP-wuqo",
+        "pledgeId": "PL0001"
+      },
+      "ref": {
+        "releaseId": "RL0001",
+        "token": "TKN-RL0001-ZSPLJ945",
+        "qty": 1000,
+        "remaining": 0,
+        "receiptId": "WR0001"
+      },
+      "eventSeq": 11
+    },
+    {
+      "id": "OP0008",
+      "seq": 8,
+      "at": 1790787457452,
+      "action": "release",
+      "actionLabel": "质权人放行",
+      "actorId": "FIN-CMB",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "release:REL-DUP-wuqo",
+      "outcome": "REJECTED",
+      "reasonCode": "FORBIDDEN",
+      "reason": "仅当前质权人 FIN-ICBC 可重放该放行请求",
+      "request": {
+        "reqId": "REL-DUP-wuqo",
+        "pledgeId": "PL0001"
+      },
+      "ref": null,
+      "eventSeq": 12
+    },
+    {
+      "id": "OP0009",
+      "seq": 9,
+      "at": 1790787457455,
+      "action": "release",
+      "actionLabel": "质权人放行",
+      "actorId": "FIN-CMB",
+      "sessionId": "SES-REFRESH-h0kj7",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "idempotencyKey": "release:REQ-5k97ut3s",
+      "outcome": "REJECTED",
+      "reasonCode": "FORBIDDEN",
+      "reason": "仅当前质权人 FIN-ICBC 可放行货物,FIN-CMB 的请求拒绝",
+      "request": {
+        "reqId": "REQ-5k97ut3s",
+        "pledgeId": "PL0001"
+      },
+      "ref": null,
+      "eventSeq": 13
+    },
+    {
+      "id": "OP0010",
+      "seq": 10,
+      "at": 1790787457457,
+      "action": "lock",
+      "actionLabel": "锁仓",
+      "actorId": "FIN-CMB",
+      "sessionId": "SES-DENY-p3lzl",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "idempotencyKey": "pledge-lock:REQ-h7ojnkj9",
+      "outcome": "SUCCESS",
+      "reasonCode": null,
+      "reason": null,
+      "request": {
+        "reqId": "REQ-h7ojnkj9",
+        "receiptId": "WR0002",
+        "financerId": "FIN-CMB",
+        "valuationBatchId": "VB0001",
+        "loanAmount": 10000000
+      },
+      "ref": {
+        "pledgeId": "PL0002",
+        "receiptId": "WR0002",
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "status": "LOCKED"
+      },
+      "eventSeq": 15
+    },
+    {
+      "id": "OP0011",
+      "seq": 11,
+      "at": 1790787457461,
+      "action": "register",
+      "actionLabel": "质押登记",
+      "actorId": "FIN-CMB",
+      "sessionId": "SES-DENY-p3lzl",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "idempotencyKey": "register:REG1790787457461g5jt",
+      "outcome": "CONFLICT",
+      "reasonCode": "STALE_RECEIPT_VERSION",
+      "reason": "登记基于仓单版本 v1,但当前已为 v2(复检/拆分导致版本前进),旧版登记拒绝",
+      "request": {
+        "pledgeId": "PL0002",
+        "registrationNo": "REG1790787457461g5jt",
+        "expectedVersion": 1
+      },
+      "ref": null,
+      "eventSeq": 18
+    },
+    {
+      "id": "OP0012",
+      "seq": 12,
+      "at": 1790787457466,
+      "action": "register",
+      "actionLabel": "质押登记",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-DENY-p3lzl",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "idempotencyKey": "register:REG1790787457465p3wh",
+      "outcome": "REJECTED",
+      "reasonCode": "FORBIDDEN",
+      "reason": "仅当前质权人 FIN-CMB 可登记,FIN-ICBC 的请求拒绝",
+      "request": {
+        "pledgeId": "PL0002",
+        "registrationNo": "REG1790787457465p3wh",
+        "expectedVersion": 2
+      },
+      "ref": null,
+      "eventSeq": 19
+    },
+    {
+      "id": "OP0013",
+      "seq": 13,
+      "at": 1790787457471,
+      "action": "lock",
+      "actionLabel": "锁仓",
+      "actorId": "FIN-ICBC",
+      "sessionId": "SES-RACE-g986p",
+      "receiptId": "WR0003",
+      "pledgeId": "PL0003",
+      "idempotencyKey": "pledge-lock:REQ-8qfbsd4y",
+      "outcome": "SUCCESS",
+      "reasonCode": null,
+      "reason": null,
+      "request": {
+        "reqId": "REQ-8qfbsd4y",
+        "receiptId": "WR0003",
+        "financerId": "FIN-ICBC",
+        "valuationBatchId": "VB0001",
+        "loanAmount": 10000000
+      },
+      "ref": {
+        "pledgeId": "PL0003",
+        "receiptId": "WR0003",
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "status": "LOCKED"
+      },
+      "eventSeq": 21
+    },
+    {
+      "id": "OP0014",
+      "seq": 14,
+      "at": 1790787457473,
+      "action": "lock",
+      "actionLabel": "锁仓",
+      "actorId": "FIN-CMB",
+      "sessionId": "SES-RACE-g986p",
+      "receiptId": "WR0003",
+      "pledgeId": null,
+      "idempotencyKey": "pledge-lock:REQ-vidboo1t",
+      "outcome": "CONFLICT",
+      "reasonCode": "ALREADY_PLEDGED",
+      "reason": "仓单 WR0003 已存在 LOCKED 状态的质押 PL0003(质权人 FIN-ICBC),禁止重复融资",
+      "request": {
+        "reqId": "REQ-vidboo1t",
+        "receiptId": "WR0003",
+        "financerId": "FIN-CMB",
+        "valuationBatchId": "VB0001",
+        "loanAmount": 10000000
+      },
+      "ref": null,
+      "eventSeq": 22
+    }
+  ],
+  "idempotency": {
+    "pledge-lock:REQ-ez4n1vdd": {
+      "pledgeId": "PL0001",
+      "at": 1790787457430
+    },
+    "register:REG1790787457433f5ms": {
+      "pledgeId": "PL0001",
+      "at": 1790787457434
+    },
+    "release:REL-DUP-wuqo": {
+      "releaseId": "RL0001",
+      "at": 1790787457448
+    },
+    "pledge-lock:REQ-h7ojnkj9": {
+      "pledgeId": "PL0002",
+      "at": 1790787457457
+    },
+    "pledge-lock:REQ-8qfbsd4y": {
+      "pledgeId": "PL0003",
+      "at": 1790787457471
+    }
+  },
+  "events": [
+    {
+      "seq": 1,
+      "ts": 1790787457430,
+      "type": "PLEDGE_LOCKED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "financerId": "FIN-ICBC",
+        "pledgorId": "ENT-HONGTAI",
+        "loanAmount": 40000000,
+        "lockedValue": 72500000,
+        "notice": "仅内部锁定,登记成功前不得对外宣称担保生效"
+      },
+      "prevHash": "GENESIS",
+      "hash": "265371362f0f1aa5861aaf8bdc596334e9d38a55c6cc26188ab7d9a1f16b46dd"
+    },
+    {
+      "seq": 2,
+      "ts": 1790787457431,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0001",
+        "action": "lock",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "SUCCESS",
+        "reasonCode": null,
+        "idempotencyKey": "pledge-lock:REQ-ez4n1vdd",
+        "ref": {
+          "pledgeId": "PL0001",
+          "receiptId": "WR0001",
+          "receiptVersion": 1,
+          "valuationBatchId": "VB0001",
+          "status": "LOCKED"
+        }
+      },
+      "prevHash": "265371362f0f1aa5861aaf8bdc596334e9d38a55c6cc26188ab7d9a1f16b46dd",
+      "hash": "567a4fcc4a8664034307b9ce193232c9400e5a9a117e09f22d4dbcf224ccedf8"
+    },
+    {
+      "seq": 3,
+      "ts": 1790787457434,
+      "type": "PLEDGE_REGISTERED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "registrationNo": "REG1790787457433f5ms",
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001"
+      },
+      "prevHash": "567a4fcc4a8664034307b9ce193232c9400e5a9a117e09f22d4dbcf224ccedf8",
+      "hash": "7856af18302b6c86da280523b1abf18c319d0e551d5963a81762d51a75a72924"
+    },
+    {
+      "seq": 4,
+      "ts": 1790787457434,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0002",
+        "action": "register",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "SUCCESS",
+        "reasonCode": null,
+        "idempotencyKey": "register:REG1790787457433f5ms",
+        "ref": {
+          "pledgeId": "PL0001",
+          "registrationNo": "REG1790787457433f5ms",
+          "registeredAt": 1790787457434,
+          "registrar": "登记中心",
+          "receiptVersion": 1
+        }
+      },
+      "prevHash": "7856af18302b6c86da280523b1abf18c319d0e551d5963a81762d51a75a72924",
+      "hash": "3ccf0aa21a1959181c78b0404790838a9018040799d2812ba5423902c5cbd42f"
+    },
+    {
+      "seq": 5,
+      "ts": 1790787457440,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0003",
+        "action": "lock",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "CONFLICT",
+        "reasonCode": "IDEMPOTENT_REPLAY",
+        "idempotencyKey": "pledge-lock:REQ-ez4n1vdd",
+        "ref": {
+          "pledgeId": "PL0001",
+          "receiptId": "WR0001",
+          "receiptVersion": 1,
+          "valuationBatchId": "VB0001",
+          "status": "REGISTERED"
+        }
+      },
+      "prevHash": "3ccf0aa21a1959181c78b0404790838a9018040799d2812ba5423902c5cbd42f",
+      "hash": "7991ff46026647395d0d038e9581cc001343df1c05ab8cd06ef54fcee7579bf8"
+    },
+    {
+      "seq": 6,
+      "ts": 1790787457442,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0004",
+        "action": "register",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "CONFLICT",
+        "reasonCode": "IDEMPOTENT_REPLAY",
+        "idempotencyKey": "register:REG1790787457433f5ms",
+        "ref": {
+          "pledgeId": "PL0001",
+          "registrationNo": "REG1790787457433f5ms",
+          "registeredAt": 1790787457434,
+          "registrar": "登记中心",
+          "receiptVersion": 1
+        }
+      },
+      "prevHash": "7991ff46026647395d0d038e9581cc001343df1c05ab8cd06ef54fcee7579bf8",
+      "hash": "6087b02fb80ce43c7689a35205dba44cd2de11689557800009b13762fc0a1293"
+    },
+    {
+      "seq": 7,
+      "ts": 1790787457446,
+      "type": "LOAN_REPAID",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "ENT-HONGTAI",
+      "payload": {
+        "amount": 40000000,
+        "coveredAmount": 40000000,
+        "exposure": 0
+      },
+      "prevHash": "6087b02fb80ce43c7689a35205dba44cd2de11689557800009b13762fc0a1293",
+      "hash": "fe837fc71c6469001c1c253d3e978ea94ab69ac960012e89da56d960d08a874e"
+    },
+    {
+      "seq": 8,
+      "ts": 1790787457446,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "ENT-HONGTAI",
+      "payload": {
+        "opId": "OP0005",
+        "action": "repay",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "SUCCESS",
+        "reasonCode": null,
+        "idempotencyKey": null,
+        "ref": {
+          "pledgeId": "PL0001",
+          "status": "REGISTERED",
+          "exposure": 0
+        }
+      },
+      "prevHash": "fe837fc71c6469001c1c253d3e978ea94ab69ac960012e89da56d960d08a874e",
+      "hash": "23b7393be56ae654ee460603aed3dad9899f4fe0ee9126ebed725ce2e877bfa8"
+    },
+    {
+      "seq": 9,
+      "ts": 1790787457448,
+      "type": "RELEASE_GRANTED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "releaseId": "RL0001",
+        "qty": 1000,
+        "remaining": 0,
+        "allReleased": true
+      },
+      "prevHash": "23b7393be56ae654ee460603aed3dad9899f4fe0ee9126ebed725ce2e877bfa8",
+      "hash": "2df93d35ffc97e953b83465c34221be8ad92132935e08675a68ccaa6a6b2c7cd"
+    },
+    {
+      "seq": 10,
+      "ts": 1790787457448,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0006",
+        "action": "release",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "SUCCESS",
+        "reasonCode": null,
+        "idempotencyKey": "release:REL-DUP-wuqo",
+        "ref": {
+          "releaseId": "RL0001",
+          "token": "TKN-RL0001-ZSPLJ945",
+          "qty": 1000,
+          "remaining": 0,
+          "receiptId": "WR0001"
+        }
+      },
+      "prevHash": "2df93d35ffc97e953b83465c34221be8ad92132935e08675a68ccaa6a6b2c7cd",
+      "hash": "0f87e019a6ba3073879bee8c8fe3a4913ee98e27191e886a1f9352edf22b4f11"
+    },
+    {
+      "seq": 11,
+      "ts": 1790787457449,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0007",
+        "action": "release",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "CONFLICT",
+        "reasonCode": "IDEMPOTENT_REPLAY",
+        "idempotencyKey": "release:REL-DUP-wuqo",
+        "ref": {
+          "releaseId": "RL0001",
+          "token": "TKN-RL0001-ZSPLJ945",
+          "qty": 1000,
+          "remaining": 0,
+          "receiptId": "WR0001"
+        }
+      },
+      "prevHash": "0f87e019a6ba3073879bee8c8fe3a4913ee98e27191e886a1f9352edf22b4f11",
+      "hash": "4454f2548c4a9e51b944914c2a3ae42d460f6586c12f6676d69298d3aeeb1aad"
+    },
+    {
+      "seq": 12,
+      "ts": 1790787457452,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-CMB",
+      "payload": {
+        "opId": "OP0008",
+        "action": "release",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "REJECTED",
+        "reasonCode": "FORBIDDEN",
+        "idempotencyKey": "release:REL-DUP-wuqo",
+        "ref": null
+      },
+      "prevHash": "4454f2548c4a9e51b944914c2a3ae42d460f6586c12f6676d69298d3aeeb1aad",
+      "hash": "64ae3519ea25bd8872da10f33beb5cd0bec9066cda57e9cff99cdf6be777868a"
+    },
+    {
+      "seq": 13,
+      "ts": 1790787457455,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0001",
+      "pledgeId": "PL0001",
+      "actorId": "FIN-CMB",
+      "payload": {
+        "opId": "OP0009",
+        "action": "release",
+        "sessionId": "SES-REFRESH-h0kj7",
+        "outcome": "REJECTED",
+        "reasonCode": "FORBIDDEN",
+        "idempotencyKey": "release:REQ-5k97ut3s",
+        "ref": null
+      },
+      "prevHash": "64ae3519ea25bd8872da10f33beb5cd0bec9066cda57e9cff99cdf6be777868a",
+      "hash": "770e6fbe4058b975a77d27df503d9095fea8f3bc7ddf672f0913c7e48a7d7e25"
+    },
+    {
+      "seq": 14,
+      "ts": 1790787457457,
+      "type": "PLEDGE_LOCKED",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "actorId": "FIN-CMB",
+      "payload": {
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "financerId": "FIN-CMB",
+        "pledgorId": "ENT-HONGTAI",
+        "loanAmount": 10000000,
+        "lockedValue": 43500000,
+        "notice": "仅内部锁定,登记成功前不得对外宣称担保生效"
+      },
+      "prevHash": "770e6fbe4058b975a77d27df503d9095fea8f3bc7ddf672f0913c7e48a7d7e25",
+      "hash": "d5401942079d13650846a674e62c40fa97cb28ab1ee3eff7584b03e935f36f85"
+    },
+    {
+      "seq": 15,
+      "ts": 1790787457457,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "actorId": "FIN-CMB",
+      "payload": {
+        "opId": "OP0010",
+        "action": "lock",
+        "sessionId": "SES-DENY-p3lzl",
+        "outcome": "SUCCESS",
+        "reasonCode": null,
+        "idempotencyKey": "pledge-lock:REQ-h7ojnkj9",
+        "ref": {
+          "pledgeId": "PL0002",
+          "receiptId": "WR0002",
+          "receiptVersion": 1,
+          "valuationBatchId": "VB0001",
+          "status": "LOCKED"
+        }
+      },
+      "prevHash": "d5401942079d13650846a674e62c40fa97cb28ab1ee3eff7584b03e935f36f85",
+      "hash": "b4ac59f5a180d912c062494195fd448efe06d4904894a486ba6697ed4b1004f3"
+    },
+    {
+      "seq": 16,
+      "ts": 1790787457459,
+      "type": "RECEIPT_RECHECKED",
+      "receiptId": "WR0002",
+      "pledgeId": null,
+      "actorId": "WH-1",
+      "payload": {
+        "oldGradeId": "CU-A",
+        "newGradeId": "CU-A",
+        "oldQty": 600,
+        "newQty": 480,
+        "droppedQty": 120,
+        "versionAfter": 2,
+        "inspectionBatchId": "IB0004"
+      },
+      "prevHash": "b4ac59f5a180d912c062494195fd448efe06d4904894a486ba6697ed4b1004f3",
+      "hash": "90a41a62997c97c809a81ccfc5a8772db95586283dfaf2828c2c808dcfb4b497"
+    },
+    {
+      "seq": 17,
+      "ts": 1790787457459,
+      "type": "PLEDGE_REVALUED",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "actorId": "WH-1",
+      "payload": {
+        "valuationBatchId": "VB0001",
+        "valueBefore": 43500000,
+        "valueAfter": 34800000,
+        "latestValue": 34800000,
+        "exposure": 10000000,
+        "shortfall": 0,
+        "status": "LOCKED"
+      },
+      "prevHash": "90a41a62997c97c809a81ccfc5a8772db95586283dfaf2828c2c808dcfb4b497",
+      "hash": "4ae191eba0475fa6674894e1625bc434c760ad93b396a29c40ac4de0a695d130"
+    },
+    {
+      "seq": 18,
+      "ts": 1790787457461,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "actorId": "FIN-CMB",
+      "payload": {
+        "opId": "OP0011",
+        "action": "register",
+        "sessionId": "SES-DENY-p3lzl",
+        "outcome": "CONFLICT",
+        "reasonCode": "STALE_RECEIPT_VERSION",
+        "idempotencyKey": "register:REG1790787457461g5jt",
+        "ref": null
+      },
+      "prevHash": "4ae191eba0475fa6674894e1625bc434c760ad93b396a29c40ac4de0a695d130",
+      "hash": "509c7b0afce68e8f70c3e9ffeb0bd4ac8001c19abe00faa6b37968ca32b08b50"
+    },
+    {
+      "seq": 19,
+      "ts": 1790787457466,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0002",
+      "pledgeId": "PL0002",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0012",
+        "action": "register",
+        "sessionId": "SES-DENY-p3lzl",
+        "outcome": "REJECTED",
+        "reasonCode": "FORBIDDEN",
+        "idempotencyKey": "register:REG1790787457465p3wh",
+        "ref": null
+      },
+      "prevHash": "509c7b0afce68e8f70c3e9ffeb0bd4ac8001c19abe00faa6b37968ca32b08b50",
+      "hash": "5b392f7c58e6bc9be1072482d39c0ea826364754d2a4be85d9bde7a8e612dbdb"
+    },
+    {
+      "seq": 20,
+      "ts": 1790787457471,
+      "type": "PLEDGE_LOCKED",
+      "receiptId": "WR0003",
+      "pledgeId": "PL0003",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "receiptVersion": 1,
+        "valuationBatchId": "VB0001",
+        "financerId": "FIN-ICBC",
+        "pledgorId": "ENT-LVYE",
+        "loanAmount": 10000000,
+        "lockedValue": 39800000,
+        "notice": "仅内部锁定,登记成功前不得对外宣称担保生效"
+      },
+      "prevHash": "5b392f7c58e6bc9be1072482d39c0ea826364754d2a4be85d9bde7a8e612dbdb",
+      "hash": "2657b82596c3638f3a33e41a27a7b018b05f01926a3d6ab7999849d002689f06"
+    },
+    {
+      "seq": 21,
+      "ts": 1790787457471,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0003",
+      "pledgeId": "PL0003",
+      "actorId": "FIN-ICBC",
+      "payload": {
+        "opId": "OP0013",
+        "action": "lock",
+        "sessionId": "SES-RACE-g986p",
+        "outcome": "SUCCESS",
+        "reasonCode": null,
+        "idempotencyKey": "pledge-lock:REQ-8qfbsd4y",
+        "ref": {
+          "pledgeId": "PL0003",
+          "receiptId": "WR0003",
+          "receiptVersion": 1,
+          "valuationBatchId": "VB0001",
+          "status": "LOCKED"
+        }
+      },
+      "prevHash": "2657b82596c3638f3a33e41a27a7b018b05f01926a3d6ab7999849d002689f06",
+      "hash": "dfcc27ef7e91ce2e5b83aa6d1a7bc9b6f1135c8a7d8846427dec6bb86c9e2e20"
+    },
+    {
+      "seq": 22,
+      "ts": 1790787457473,
+      "type": "ATTEMPT_LOGGED",
+      "receiptId": "WR0003",
+      "pledgeId": null,
+      "actorId": "FIN-CMB",
+      "payload": {
+        "opId": "OP0014",
+        "action": "lock",
+        "sessionId": "SES-RACE-g986p",
+        "outcome": "CONFLICT",
+        "reasonCode": "ALREADY_PLEDGED",
+        "idempotencyKey": "pledge-lock:REQ-vidboo1t",
+        "ref": null
+      },
+      "prevHash": "dfcc27ef7e91ce2e5b83aa6d1a7bc9b6f1135c8a7d8846427dec6bb86c9e2e20",
+      "hash": "bc0eb35daa3b19c6d5b0d56d1b3990fe971a7dd48bb212a22fc3f2479adb5056"
+    }
+  ]
+}
